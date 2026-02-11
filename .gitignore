@@ -1,0 +1,30 @@
+# Node
+node_modules/
+
+# Vite/Electron builds
+/dist/
+/dist-electron/
+/release/
+
+# Electron
+*.log
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+*.tmp

@@ -1,0 +1,50 @@
+import type { IElectronAPI } from "../../shared/preload";
+import type { PythonResponse } from "../../shared/ipc";
+
+function getElectron(): IElectronAPI {
+  if (!window.electronAPI) {
+    throw new Error("Electron preload bridge is not available.");
+  }
+  return window.electronAPI;
+}
+
+export const electron = {
+  readText(path: string): Promise<string> {
+    return getElectron().readText(path);
+  },
+  writeText(path: string, text: string): Promise<void> {
+    return getElectron().writeText(path, text);
+  },
+  ensureDir(path: string): Promise<void> {
+    return getElectron().ensureDir(path);
+  },
+  exists(path: string): Promise<boolean> {
+    return getElectron().exists(path);
+  },
+  listDir(path: string): ReturnType<IElectronAPI["listDir"]> {
+    return getElectron().listDir(path);
+  },
+  stat(path: string): ReturnType<IElectronAPI["stat"]> {
+    return getElectron().stat(path);
+  },
+  pickFile(options: Parameters<IElectronAPI["pickFile"]>[0]): ReturnType<IElectronAPI["pickFile"]> {
+    return getElectron().pickFile(options);
+  },
+  pickDir(options?: Parameters<IElectronAPI["pickDir"]>[0]): ReturnType<IElectronAPI["pickDir"]> {
+    return getElectron().pickDir(options);
+  },
+  getPath(kind: Parameters<IElectronAPI["getPath"]>[0]): Promise<string> {
+    return getElectron().getPath(kind);
+  },
+  normalizePaths(items: string[]): Promise<string[]> {
+    return getElectron().normalizePaths(items);
+  },
+  runPythonCommand(cmd: string, args?: Record<string, unknown>, options?: { timeoutMs?: number }): Promise<PythonResponse> {
+    return getElectron().runPythonCommand(cmd, args, options);
+  },
+  setWindowTitle(title: string): Promise<boolean> {
+    return getElectron().setWindowTitle(title);
+  },
+} as const;
+
+export type Electron = typeof electron;

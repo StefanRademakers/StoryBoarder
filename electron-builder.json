@@ -1,0 +1,20 @@
+{
+  "appId": "com.example.newelectronreactapp",
+  "productName": "NewElectronReactApp",
+  "directories": {
+    "output": "release",
+    "buildResources": "assets"
+  },
+  "artifactName": "${productName}-Setup-${version}.${ext}",
+  "files": [
+    "dist-electron/**/*",
+    "dist/**/*"
+  ],
+  "extraResources": [
+    { "from": "python", "to": "python" },
+    { "from": ".venv", "to": ".venv" }
+  ],
+  "win": {
+    "icon": "assets/icon.ico"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "new-electron-react-app",
+  "version": "0.1.0",
+  "description": "Electron + React + TypeScript boilerplate with embedded Python service.",
+  "private": true,
+  "main": "dist-electron/electron/main.js",
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "scripts": {
+    "build:react": "vite build",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "build": "npm run build:react && npm run build:electron",
+    "electron:start": "electron .",
+    "start": "npm run build && npm run electron:start",
+    "dev": "npm exec -- concurrently -k \"npm:dev:renderer\" \"npm:dev:tsc\" \"npm:dev:electron\"",
+    "dev:renderer": "vite dev",
+    "dev:tsc": "tsc -p electron/tsconfig.json --watch",
+    "dev:electron": "wait-on tcp:5173 dist-electron/electron/main.js && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electronmon dist-electron/electron/main.js"
+  },
+  "dependencies": {
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.11.17",
+    "@types/react": "18.2.37",
+    "@types/react-dom": "18.2.15",
+    "@vitejs/plugin-react": "4.2.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "28.2.3",
+    "electron-builder": "24.9.1",
+    "electronmon": "^2.0.3",
+    "typescript": "5.3.3",
+    "vite": "5.1.3",
+    "wait-on": "^9.0.1"
+  }
+}
