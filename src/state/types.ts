@@ -4,6 +4,7 @@ export interface ProjectState {
   name: string;
   description: string;
   script?: string;
+  shotlist?: string;
   createdAt: string;
   lastModified: string;
   paths: {

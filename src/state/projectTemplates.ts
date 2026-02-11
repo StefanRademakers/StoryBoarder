@@ -24,6 +24,7 @@ export function createProjectState(params: { name: string; rootPath: string; des
     },
     images: [],
     script: "",
+    shotlist: "",
   };
 }
 
