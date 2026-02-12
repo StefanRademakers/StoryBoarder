@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ProjectsIndex, ProjectsIndexEntry } from "../state/types";
 import { NewProjectModal } from "../components/layout/NewProjectModal";
-import { joinPath, toFileUrl } from "../utils/path";
-import { resolveProjectsIndexLocation } from "../utils/projectsIndexPaths";
+import { toFileUrl } from "../utils/path";
 
 const PlusIcon = (
   <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
@@ -92,19 +91,7 @@ export function ProjectsOverview({
           </button>
 
           {projects.map((p) => {
-            const resolvedLocation = resolveProjectsIndexLocation(p.location);
             const displayLocation = p.location;
-            const speakersDir = joinPath(resolvedLocation, "Speakers");
-            const preferredOrder = ["close", "medium", "wide"] as const;
-            const guessFiles: string[] = [];
-            for (let i = 1; i <= 4; i++) {
-              for (const shot of preferredOrder) {
-                for (const ext of [".png", ".jpg", ".jpeg", ".webp"]) {
-                  guessFiles.push(joinPath(speakersDir, `${i}_${shot}_1${ext}`));
-                }
-              }
-            }
-            const candidateSrcs = guessFiles.map((f) => toFileUrl(f));
 
             return (
               <button
@@ -114,16 +101,16 @@ export function ProjectsOverview({
                 onClick={() => onOpenProject(p)}
               >
                 <div className="project-tile__frame" style={{ position: "relative", overflow: "hidden" }}>
-                  <span className="project-tile__plus" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>{PlusIcon}</span>
-                  {candidateSrcs.slice(0, 8).map((src, idx) => (
+                  {p.thumbnail ? (
                     <img
-                      key={`${src}-${idx}`}
-                      src={src}
+                      src={toFileUrl(p.thumbnail)}
                       alt=""
                       style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", borderRadius: 12, display: "block" }}
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
                     />
-                  ))}
+                  ) : (
+                    <span className="project-tile__plus" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>{PlusIcon}</span>
+                  )}
                 </div>
                 <span className="project-tile__name" style={{ textAlign: "center", width: "100%" }}>{p.name}</span>
                 <span className="project-tile__meta" style={{ textAlign: "center", width: "100%" }}>{displayLocation}</span>

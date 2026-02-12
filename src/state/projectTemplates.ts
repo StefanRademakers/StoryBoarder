@@ -25,6 +25,7 @@ export function createProjectState(params: { name: string; rootPath: string; des
     images: [],
     script: "",
     shotlist: "",
+    thumbnail: "",
   };
 }
 
@@ -35,5 +36,6 @@ export function buildProjectsIndexEntry(project: ProjectState, location: string)
     location,
     lastModified: project.lastModified,
     lastUpdated: project.lastModified,
+    thumbnail: project.thumbnail,
   };
 }

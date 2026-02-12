@@ -27,6 +27,15 @@ export const electron = {
   stat(path: string): ReturnType<IElectronAPI["stat"]> {
     return getElectron().stat(path);
   },
+  rename(oldPath: string, newPath: string): Promise<void> {
+    return getElectron().rename(oldPath, newPath);
+  },
+  copyFile(from: string, to: string): Promise<void> {
+    return getElectron().copyFile(from, to);
+  },
+  deleteFile(path: string): Promise<void> {
+    return getElectron().deleteFile(path);
+  },
   pickFile(options: Parameters<IElectronAPI["pickFile"]>[0]): ReturnType<IElectronAPI["pickFile"]> {
     return getElectron().pickFile(options);
   },

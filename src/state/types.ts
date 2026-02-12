@@ -5,6 +5,7 @@ export interface ProjectState {
   description: string;
   script?: string;
   shotlist?: string;
+  thumbnail?: string;
   createdAt: string;
   lastModified: string;
   paths: {
@@ -19,6 +20,7 @@ export interface ProjectsIndexEntry {
   location: string;
   lastModified: string;
   lastUpdated: string;
+  thumbnail?: string;
 }
 
 export interface ProjectsIndex {

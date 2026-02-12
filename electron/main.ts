@@ -130,6 +130,15 @@ ipcMain.handle("fs:write-text", async (_event, { path: filePath, text }: { path:
   await fsPromises.mkdir(dir, { recursive: true });
   await fsPromises.writeFile(filePath, text, "utf8");
 });
+ipcMain.handle("fs:copy-file", async (_event, { from, to }: { from: string; to: string }) => {
+  const dir = path.dirname(to);
+  await fsPromises.mkdir(dir, { recursive: true });
+  await fsPromises.copyFile(from, to);
+});
+
+ipcMain.handle("fs:delete-file", async (_event, { path: filePath }: { path: string }) => {
+  await fsPromises.unlink(filePath);
+});
 ipcMain.handle("fs:ensure-dir", async (_event, { path: dir }: { path: string }) => {
   await fsPromises.mkdir(dir, { recursive: true });
 });
@@ -152,6 +161,10 @@ ipcMain.handle("fs:stat", async (_event, { path: filePath }: { path: string }) =
   } catch {
     return null;
   }
+});
+
+ipcMain.handle("fs:rename", async (_event, { oldPath, newPath }: { oldPath: string; newPath: string }) => {
+  await fsPromises.rename(oldPath, newPath);
 });
 
 ipcMain.handle("fs:get-path", async (_event, { kind }: { kind: AppPathKind }) => {

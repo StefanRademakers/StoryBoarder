@@ -47,6 +47,7 @@ async function scanProjects(rootPath: string): Promise<ProjectsIndex> {
           location: rel,
           lastModified: last,
           lastUpdated: last,
+          thumbnail: parsed.thumbnail,
         });
       } catch {
         // ignore broken project.json

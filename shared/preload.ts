@@ -24,6 +24,9 @@ export interface IElectronAPI {
   exists(path: string): Promise<boolean>;
   listDir(path: string): Promise<Array<{ name: string; isFile: boolean; isDirectory: boolean }>>;
   stat(path: string): Promise<{ mtimeMs: number; ctimeMs: number; isFile: boolean; isDirectory: boolean } | null>;
+  rename(oldPath: string, newPath: string): Promise<void>;
+  copyFile(from: string, to: string): Promise<void>;
+  deleteFile(path: string): Promise<void>;
   pickFile(options: PickFileOptions): Promise<DialogFileResult>;
   pickDir(options?: PickDirOptions): Promise<DialogFileResult>;
   getPath(kind: AppPathKind): Promise<string>;

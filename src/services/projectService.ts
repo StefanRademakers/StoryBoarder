@@ -29,6 +29,10 @@ const PROJECT_SUBDIRECTORIES = [
   "script",
   "scenes",
   "images",
+  "notes",
+  "resources",
+  "todos",
+  "prompts",
 ] as const;
 
 async function ensureProjectStructure(projectDir: string): Promise<void> {
