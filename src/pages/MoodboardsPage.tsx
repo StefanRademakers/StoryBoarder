@@ -10,7 +10,7 @@ export function MoodboardsPage({ project }: MoodboardsPageProps) {
     <FolderImageBoardsPage
       project={project}
       folderName="moodboards"
-      pageTitle="Moodboards"
+      pageTitle="Moodboards & Visual References - Images & Videos"
       sectionTitle="Organize visual references per moodboard."
       singularLabel="Moodboard"
     />

@@ -19,20 +19,11 @@ interface BoardItem {
   path: string;
 }
 
-interface BoardImage {
+interface BoardMedia {
   name: string;
   path: string;
   mtimeMs: number;
 }
-
-const SettingsIcon = (
-  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
-    <path
-      d="M12 8.5a3.5 3.5 0 1 1 0 7a3.5 3.5 0 0 1 0-7Zm8 3.5l-1.86-.58a6.58 6.58 0 0 0-.45-1.09l.9-1.72l-1.42-1.42l-1.72.9c-.35-.18-.71-.33-1.09-.45L14 4h-4l-.58 1.86c-.38.12-.74.27-1.09.45l-1.72-.9L5.2 6.83l.9 1.72c-.18.35-.33.71-.45 1.09L4 12v2l1.86.58c.12.38.27.74.45 1.09l-.9 1.72l1.42 1.42l1.72-.9c.35.18.71.33 1.09.45L10 20h4l.58-1.86c.38-.12.74-.27 1.09-.45l1.72.9l1.42-1.42l-.9-1.72c.18-.35.33-.71.45-1.09L20 14v-2Z"
-      fill="currentColor"
-    />
-  </svg>
-);
 
 export function FolderImageBoardsPage({
   project,
@@ -41,7 +32,7 @@ export function FolderImageBoardsPage({
   sectionTitle,
   singularLabel,
 }: FolderImageBoardsPageProps) {
-  const { updateProject } = useAppState();
+  const { appSettings } = useAppState();
   const revealLabel = isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer";
   const rootDir = joinPath(project.paths.root, folderName);
   const [items, setItems] = useState<BoardItem[]>([]);
@@ -49,21 +40,19 @@ export function FolderImageBoardsPage({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [images, setImages] = useState<BoardImage[]>([]);
+  const [images, setImages] = useState<BoardMedia[]>([]);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [previewSize, setPreviewSize] = useState<{ width: number; height: number } | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmTarget, setConfirmTarget] = useState<BoardImage | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<BoardMedia | null>(null);
   const [menuItem, setMenuItem] = useState<BoardItem | null>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<BoardItem | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [photoshopPath, setPhotoshopPath] = useState(project.settings?.photoshopPath ?? "");
   const [actionError, setActionError] = useState<string | null>(null);
-  const [imageMenuItem, setImageMenuItem] = useState<BoardImage | null>(null);
+  const [imageMenuItem, setImageMenuItem] = useState<BoardMedia | null>(null);
   const [imageMenuPos, setImageMenuPos] = useState<{ x: number; y: number } | null>(null);
 
   const loadItems = async () => {
@@ -88,8 +77,8 @@ export function FolderImageBoardsPage({
 
   const loadImages = async (dir: string) => {
     const entries = await electron.listDir(dir);
-    const files = entries.filter((e) => e.isFile && isImageFile(e.name));
-    const list: BoardImage[] = [];
+    const files = entries.filter((e) => e.isFile && isSupportedMediaFile(e.name));
+    const list: BoardMedia[] = [];
     for (const f of files) {
       const path = joinPath(dir, f.name);
       const stat = await electron.stat(path);
@@ -146,22 +135,26 @@ export function FolderImageBoardsPage({
     setImageMenuPos(null);
   };
 
-  const openImageMenu = (event: MouseEvent, image: BoardImage) => {
+  const openImageMenu = (event: MouseEvent, image: BoardMedia) => {
     event.preventDefault();
     setImageMenuItem(image);
     setImageMenuPos({ x: event.clientX, y: event.clientY });
   };
 
-  const revealImageInExplorer = async (image: BoardImage) => {
+  const revealImageInExplorer = async (image: BoardMedia) => {
     await electron.revealInFileManager(image.path);
     closeImageMenu();
   };
 
-  const openImageInPhotoshop = async (image: BoardImage) => {
-    const configuredPath = project.settings?.photoshopPath?.trim() ?? "";
+  const openImageInPhotoshop = async (image: BoardMedia) => {
+    if (isVideoFile(image.path)) {
+      setActionError("Photoshop action is only available for images.");
+      closeImageMenu();
+      return;
+    }
+    const configuredPath = appSettings.photoshopPath.trim();
     if (!configuredPath) {
-      setActionError("Set Photoshop location first.");
-      setSettingsOpen(true);
+      setActionError("Set Photoshop location in Projects > Settings.");
       closeImageMenu();
       return;
     }
@@ -174,7 +167,12 @@ export function FolderImageBoardsPage({
     closeImageMenu();
   };
 
-  const copyImageToClipboard = async (image: BoardImage) => {
+  const copyImageToClipboard = async (image: BoardMedia) => {
+    if (isVideoFile(image.path)) {
+      setActionError("Copy to clipboard is only available for images.");
+      closeImageMenu();
+      return;
+    }
     const ok = await electron.copyImageToClipboard(image.path);
     if (!ok) {
       setActionError("Failed to copy image to clipboard.");
@@ -236,11 +234,7 @@ export function FolderImageBoardsPage({
   };
 
   const currentImage = previewIndex === null ? null : images[previewIndex] ?? null;
-
-  useEffect(() => {
-    if (!settingsOpen) return;
-    setPhotoshopPath(project.settings?.photoshopPath ?? "");
-  }, [settingsOpen, project.settings?.photoshopPath]);
+  const currentIsVideo = currentImage ? isVideoFile(currentImage.path) : false;
 
   useEffect(() => {
     if (!currentImage) {
@@ -248,16 +242,30 @@ export function FolderImageBoardsPage({
       return;
     }
     let canceled = false;
-    const img = new Image();
-    img.onload = () => {
-      if (canceled) return;
-      setPreviewSize({ width: img.naturalWidth, height: img.naturalHeight });
-    };
-    img.onerror = () => {
-      if (canceled) return;
-      setPreviewSize(null);
-    };
-    img.src = toFileUrl(currentImage.path);
+    if (isVideoFile(currentImage.path)) {
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      video.onloadedmetadata = () => {
+        if (canceled) return;
+        setPreviewSize({ width: video.videoWidth, height: video.videoHeight });
+      };
+      video.onerror = () => {
+        if (canceled) return;
+        setPreviewSize(null);
+      };
+      video.src = toFileUrl(currentImage.path);
+    } else {
+      const img = new Image();
+      img.onload = () => {
+        if (canceled) return;
+        setPreviewSize({ width: img.naturalWidth, height: img.naturalHeight });
+      };
+      img.onerror = () => {
+        if (canceled) return;
+        setPreviewSize(null);
+      };
+      img.src = toFileUrl(currentImage.path);
+    }
     return () => {
       canceled = true;
     };
@@ -285,19 +293,18 @@ export function FolderImageBoardsPage({
         }
       } else if (event.key === "Enter") {
         if (!currentImage) return;
-        const configuredPath = project.settings?.photoshopPath?.trim() ?? "";
-        if (configuredPath) {
+        const configuredPath = appSettings.photoshopPath.trim();
+        if (configuredPath && !isVideoFile(currentImage.path)) {
           void electron.openWithApp(configuredPath, currentImage.path);
-        } else {
-          setActionError("Set Photoshop location first.");
-          setSettingsOpen(true);
+        } else if (!configuredPath && !isVideoFile(currentImage.path)) {
+          setActionError("Set Photoshop location in Projects > Settings.");
         }
         void electron.revealInFileManager(currentImage.path);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [previewIndex, images.length, currentImage?.path]);
+  }, [appSettings.photoshopPath, previewIndex, images.length, currentImage?.path]);
 
   const confirmDelete = async () => {
     if (!confirmTarget) return;
@@ -341,11 +348,6 @@ export function FolderImageBoardsPage({
             <h1>{pageTitle}</h1>
             <p className="page-subtitle">{sectionTitle}</p>
           </div>
-          <div className="actions">
-            <button type="button" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
-              <span className="icon">{SettingsIcon}</span>
-            </button>
-          </div>
         </header>
 
         <section className="panel">
@@ -355,13 +357,17 @@ export function FolderImageBoardsPage({
           ) : (
             <>
               <DropOrBrowse
-                label="Drop images here or click to browse"
+                label="Drop media here or click to browse"
                 className="moodboard-dropzone"
                 onPathsSelected={copyToActive}
                 browse={async () => {
                   const picked = await window.electronAPI.pickFile({
-                    title: "Select images",
-                    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
+                    title: "Select media",
+                    filters: [
+                      { name: "Media", extensions: ["png", "jpg", "jpeg", "webp", "mp4", "mov", "webm", "mkv", "avi", "m4v"] },
+                      { name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] },
+                      { name: "Videos", extensions: ["mp4", "mov", "webm", "mkv", "avi", "m4v"] },
+                    ],
                   });
                   return picked;
                 }}
@@ -376,7 +382,11 @@ export function FolderImageBoardsPage({
                     onContextMenu={(event) => openImageMenu(event, img)}
                   >
                     <div className="moodboard-tile__img">
-                      <img src={toFileUrl(img.path)} alt="" />
+                      {isVideoFile(img.path) ? (
+                        <video src={toFileUrl(img.path)} muted playsInline autoPlay loop preload="metadata" />
+                      ) : (
+                        <img src={toFileUrl(img.path)} alt="" />
+                      )}
                     </div>
                     <div className="moodboard-tile__label">{img.name}</div>
                   </button>
@@ -464,68 +474,6 @@ export function FolderImageBoardsPage({
         </div>
       ) : null}
 
-      {settingsOpen ? (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <div className="modal__header">
-              <h3 className="modal__title">Settings</h3>
-            </div>
-            <div className="form-section">
-              <label className="form-row">
-                <span className="section-title">Photoshop location</span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="form-input"
-                    value={photoshopPath}
-                    onChange={(event) => setPhotoshopPath(event.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="pill-button"
-                    onClick={async () => {
-                      const picked = await window.electronAPI.pickFile({
-                        title: "Select Photoshop executable",
-                        defaultPath: photoshopPath || undefined,
-                      });
-                      if (picked) {
-                        setPhotoshopPath(picked);
-                      }
-                    }}
-                  >
-                    Browse
-                  </button>
-                </div>
-              </label>
-            </div>
-            <div className="modal__footer">
-              <button
-                type="button"
-                className="pill-button"
-                onClick={() => {
-                  setSettingsOpen(false);
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="pill-button"
-                onClick={() => {
-                  updateProject((draft) => {
-                    draft.settings ??= {};
-                    draft.settings.photoshopPath = photoshopPath.trim();
-                  });
-                  setSettingsOpen(false);
-                  setActionError(null);
-                }}
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {previewIndex !== null && currentImage ? (
         <div className="moodboard-preview" onClick={closePreview}>
           <div
@@ -533,7 +481,11 @@ export function FolderImageBoardsPage({
             onClick={(e) => e.stopPropagation()}
             onContextMenu={(event) => openImageMenu(event, currentImage)}
           >
-            <img src={toFileUrl(currentImage.path)} alt="" />
+            {currentIsVideo ? (
+              <video src={toFileUrl(currentImage.path)} controls autoPlay playsInline />
+            ) : (
+              <img src={toFileUrl(currentImage.path)} alt="" />
+            )}
             <div className="moodboard-preview__name">
               {currentImage.name}
               {previewSize ? ` (${previewSize.width}x${previewSize.height})` : ""}
@@ -566,12 +518,16 @@ export function FolderImageBoardsPage({
             style={{ top: imageMenuPos.y, left: imageMenuPos.x }}
             onClick={(event) => event.stopPropagation()}
           >
-            <button type="button" className="context-menu__item" onClick={() => void openImageInPhotoshop(imageMenuItem)}>
-              Open in Photoshop
-            </button>
-            <button type="button" className="context-menu__item" onClick={() => void copyImageToClipboard(imageMenuItem)}>
-              Copy to Clipboard
-            </button>
+            {!isVideoFile(imageMenuItem.path) ? (
+              <button type="button" className="context-menu__item" onClick={() => void openImageInPhotoshop(imageMenuItem)}>
+                Open in Photoshop
+              </button>
+            ) : null}
+            {!isVideoFile(imageMenuItem.path) ? (
+              <button type="button" className="context-menu__item" onClick={() => void copyImageToClipboard(imageMenuItem)}>
+                Copy to Clipboard
+              </button>
+            ) : null}
             <button type="button" className="context-menu__item" onClick={() => void revealImageInExplorer(imageMenuItem)}>
               {revealLabel}
             </button>
@@ -581,8 +537,8 @@ export function FolderImageBoardsPage({
 
       <ConfirmDialog
         open={confirmOpen}
-        title="Delete Image"
-        message="Are you sure you want to delete this image?"
+        title="Delete Media"
+        message="Are you sure you want to delete this file?"
         onCancel={() => {
           setConfirmOpen(false);
           setConfirmTarget(null);
@@ -606,9 +562,32 @@ function normalizeName(value: string): string {
   return value.replace(/[\\/:*?"<>|]+/g, "").trim();
 }
 
-function isImageFile(name: string): boolean {
+function isSupportedMediaFile(name: string): boolean {
   const lower = name.toLowerCase();
-  return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp");
+  return (
+    lower.endsWith(".png")
+    || lower.endsWith(".jpg")
+    || lower.endsWith(".jpeg")
+    || lower.endsWith(".webp")
+    || lower.endsWith(".mp4")
+    || lower.endsWith(".mov")
+    || lower.endsWith(".webm")
+    || lower.endsWith(".mkv")
+    || lower.endsWith(".avi")
+    || lower.endsWith(".m4v")
+  );
+}
+
+function isVideoFile(path: string): boolean {
+  const lower = path.toLowerCase();
+  return (
+    lower.endsWith(".mp4")
+    || lower.endsWith(".mov")
+    || lower.endsWith(".webm")
+    || lower.endsWith(".mkv")
+    || lower.endsWith(".avi")
+    || lower.endsWith(".m4v")
+  );
 }
 
 function getBaseName(path: string): string {

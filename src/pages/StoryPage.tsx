@@ -26,7 +26,7 @@ interface StoryPageProps {
 
 export function StoryPage({ project }: StoryPageProps) {
   const [activeSection, setActiveSection] = useState<SectionKey>("settings");
-  const { updateProject, projectFilePath } = useAppState();
+  const { updateProject, projectFilePath, appSettings } = useAppState();
   const scriptTargetPath = joinPath(joinPath(project.paths.root, "script"), "script.md");
   const shotlistTargetPath = joinPath(joinPath(project.paths.root, "script"), "shotlist.md");
 
@@ -98,46 +98,12 @@ export function StoryPage({ project }: StoryPageProps) {
                       }
                       return picked;
                     }}
-                    photoshopPath={project.settings?.photoshopPath ?? ""}
+                    photoshopPath={appSettings.photoshopPath}
                   />
                 </label>
               </div>
 
               <div className="project-settings-grid__fields">
-                <label className="form-row">
-                  <span className="section-title">Photoshop location</span>
-                  <div className="project-settings__path-row">
-                    <input
-                      className="form-input"
-                      value={project.settings?.photoshopPath ?? ""}
-                      onChange={(event) => {
-                        const nextValue = event.target.value;
-                        updateProject((draft) => {
-                          draft.settings ??= {};
-                          draft.settings.photoshopPath = nextValue;
-                        });
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="pill-button"
-                      onClick={async () => {
-                        const picked = await window.electronAPI.pickFile({
-                          title: "Select Photoshop executable",
-                          defaultPath: project.settings?.photoshopPath || undefined,
-                        });
-                        if (!picked) return;
-                        updateProject((draft) => {
-                          draft.settings ??= {};
-                          draft.settings.photoshopPath = picked;
-                        });
-                      }}
-                    >
-                      Browse
-                    </button>
-                  </div>
-                </label>
-
                 <div className="project-settings__meta">
                   <label className="form-row">
                     <span className="section-title">Width</span>

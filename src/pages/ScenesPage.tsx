@@ -27,6 +27,7 @@ interface ScenesIndex {
 
 interface SceneEditorProps {
   project: ProjectState;
+  photoshopPath: string;
   scene: SceneMeta;
   scenesRoot: string;
   projectFilePath: string | null;
@@ -36,7 +37,7 @@ interface SceneEditorProps {
 const EMPTY_INDEX: ScenesIndex = { scenes: [] };
 
 export function ScenesPage({ project }: ScenesPageProps) {
-  const { projectFilePath } = useAppState();
+  const { projectFilePath, appSettings } = useAppState();
   const scenesRoot = joinPath(project.paths.root, "scenes");
   const indexPath = joinPath(scenesRoot, "scenes.json");
 
@@ -296,6 +297,7 @@ export function ScenesPage({ project }: ScenesPageProps) {
           <SceneEditor
             key={activeScene.id}
             project={project}
+            photoshopPath={appSettings.photoshopPath}
             scene={activeScene}
             scenesRoot={scenesRoot}
             projectFilePath={projectFilePath}
@@ -322,6 +324,7 @@ export function ScenesPage({ project }: ScenesPageProps) {
 
 function SceneEditor({
   project,
+  photoshopPath,
   scene,
   scenesRoot,
   projectFilePath,
@@ -411,7 +414,7 @@ function SceneEditor({
                   });
                   return picked;
                 }}
-                photoshopPath={project.settings?.photoshopPath ?? ""}
+                photoshopPath={photoshopPath}
               />
             </label>
           </div>

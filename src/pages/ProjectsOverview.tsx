@@ -16,6 +16,15 @@ const RefreshIcon = (
   </svg>
 );
 
+const GearIcon = (
+  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+    <path
+      d="M12 8.5a3.5 3.5 0 1 1 0 7a3.5 3.5 0 0 1 0-7Zm8 3.5l-1.86-.58a6.58 6.58 0 0 0-.45-1.09l.9-1.72l-1.42-1.42l-1.72.9c-.35-.18-.71-.33-1.09-.45L14 4h-4l-.58 1.86c-.38.12-.74.27-1.09.45l-1.72-.9L5.2 6.83l.9 1.72c-.18.35-.33.71-.45 1.09L4 12v2l1.86.58c.12.38.27.74.45 1.09l-.9 1.72l1.42 1.42l1.72-.9c.35.18.71.33 1.09.45L10 20h4l.58-1.86c.38-.12.74-.27 1.09-.45l1.72.9l1.42-1.42l-.9-1.72c.18-.35.33-.71.45-1.09L20 14v-2Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 interface ProjectsOverviewProps {
   projectsIndex: ProjectsIndex | null;
   rootPath: string | null;
@@ -27,6 +36,8 @@ interface ProjectsOverviewProps {
   onReload: () => void | Promise<void>;
   onRenameProject: (entry: ProjectsIndexEntry, nextName: string) => void | Promise<void>;
   onDuplicateProject: (entry: ProjectsIndexEntry) => void | Promise<void>;
+  photoshopPath: string;
+  onUpdatePhotoshopPath: (next: string) => void;
 }
 
 export function ProjectsOverview({
@@ -40,6 +51,8 @@ export function ProjectsOverview({
   onReload,
   onRenameProject,
   onDuplicateProject,
+  photoshopPath,
+  onUpdatePhotoshopPath,
 }: ProjectsOverviewProps) {
   const projects = projectsIndex?.projects ?? [];
   const [newOpen, setNewOpen] = useState(false);
@@ -50,6 +63,13 @@ export function ProjectsOverview({
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPath, setSettingsPath] = useState(photoshopPath);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    setSettingsPath(photoshopPath);
+  }, [photoshopPath, settingsOpen]);
 
   useEffect(() => {
     try {
@@ -109,6 +129,10 @@ export function ProjectsOverview({
           <p className="page-subtitle">Choose an existing project or create a new workspace.</p>
         </div>
         <div className="actions">
+          <button type="button" onClick={() => setSettingsOpen(true)} title="Global settings">
+            <span className="icon">{GearIcon}</span>
+            Settings
+          </button>
           <button type="button" onClick={onReload} title="Reload">
             <span className="icon">{RefreshIcon}</span>
             Reload
@@ -242,6 +266,58 @@ export function ProjectsOverview({
                 Cancel
               </button>
               <button type="button" className="pill-button" onClick={() => void runRename()}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {settingsOpen ? (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <div className="modal__header">
+              <h3 className="modal__title">Global Settings</h3>
+            </div>
+            <div className="form-section">
+              <label className="form-row">
+                <span className="section-title">Photoshop location</span>
+                <div className="project-settings__path-row">
+                  <input
+                    className="form-input"
+                    value={settingsPath}
+                    onChange={(event) => setSettingsPath(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="pill-button"
+                    onClick={async () => {
+                      const picked = await window.electronAPI.pickFile({
+                        title: "Select Photoshop executable",
+                        defaultPath: settingsPath || undefined,
+                      });
+                      if (picked) {
+                        setSettingsPath(picked);
+                      }
+                    }}
+                  >
+                    Browse
+                  </button>
+                </div>
+              </label>
+            </div>
+            <div className="modal__footer">
+              <button type="button" className="pill-button" onClick={() => setSettingsOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="pill-button"
+                onClick={() => {
+                  onUpdatePhotoshopPath(settingsPath.trim());
+                  setSettingsOpen(false);
+                }}
+              >
                 OK
               </button>
             </div>

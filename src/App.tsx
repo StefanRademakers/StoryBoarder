@@ -25,6 +25,7 @@ export default function App() {
   const {
     projectsIndex,
     projectsRootPath,
+    appSettings,
     project,
     loading,
     lastError,
@@ -33,6 +34,7 @@ export default function App() {
     updateProjectsIndex,
     closeProject,
     projectFilePath,
+    updateAppSettings,
   } = useAppState();
 
   const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -174,6 +176,10 @@ export default function App() {
           }}
           onRenameProject={handleRenameProject}
           onDuplicateProject={handleDuplicateProject}
+          photoshopPath={appSettings.photoshopPath}
+          onUpdatePhotoshopPath={(next) => {
+            updateAppSettings((current) => ({ ...current, photoshopPath: next }));
+          }}
         />
       );
     }
@@ -214,6 +220,7 @@ export default function App() {
     popoutTitle,
     projectsIndex,
     projectsRootPath,
+    appSettings.photoshopPath,
     loading,
     lastError,
     handleOpenProject,
@@ -222,6 +229,7 @@ export default function App() {
     handleDuplicateProject,
     handleChangeRootPath,
     updateProjectsIndex,
+    updateAppSettings,
     project,
   ]);
 

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { AppStateContextValue, ProjectState, ProjectsIndex } from "./types";
+import type { AppSettings, AppStateContextValue, ProjectState, ProjectsIndex } from "./types";
 import { debounce } from "../utils/debounce";
 import { deepClone } from "../utils/deepClone";
 import { getDirectoryName, joinPath, resolveProjectPath } from "../utils/path";
@@ -9,8 +9,10 @@ import { resolveProjectsIndexLocation, setProjectsRoot, toProjectsIndexRelative 
 
 const DEFAULT_AUTOSAVE_DELAY_MS = 500;
 const LOCAL_STORAGE_ROOT_PATH_KEY = "storybuilder.projectsRootPath";
+const LOCAL_STORAGE_APP_SETTINGS_KEY = "storybuilder.appSettings";
 const DEFAULT_PROJECTS_ROOT = "Storyboards";
 const EMPTY_PROJECTS_INDEX: ProjectsIndex = { projects: [] };
+const DEFAULT_APP_SETTINGS: AppSettings = { photoshopPath: "" };
 
 const AppStateContext = createContext<AppStateContextValue | null>(null);
 
@@ -63,6 +65,7 @@ async function scanProjects(rootPath: string): Promise<ProjectsIndex> {
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [projectsIndex, setProjectsIndex] = useState<ProjectsIndex | null>(null);
   const [projectsRootPath, setProjectsRootPathState] = useState<string | null>(null);
+  const [appSettings, setAppSettingsState] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [project, setProject] = useState<ProjectState | null>(null);
   const [projectFilePath, setProjectFilePathState] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -70,6 +73,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const projectPathRef = useRef<string | null>(null);
   const projectRef = useRef<ProjectState | null>(null);
+  const appSettingsRef = useRef<AppSettings>(DEFAULT_APP_SETTINGS);
   const dirtyRef = useRef(false);
 
   const readFile = useCallback((filePath: string) => electron.readText(filePath), []);
@@ -101,6 +105,24 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     try {
       const content = await readFile(filePath);
       const parsed = JSON.parse(content) as ProjectState;
+      const legacyPhotoshopPath = (parsed as { settings?: { photoshopPath?: unknown } }).settings?.photoshopPath;
+      if (
+        !appSettingsRef.current.photoshopPath.trim()
+        && typeof legacyPhotoshopPath === "string"
+        && legacyPhotoshopPath.trim()
+      ) {
+        const migrated: AppSettings = {
+          ...appSettingsRef.current,
+          photoshopPath: legacyPhotoshopPath.trim(),
+        };
+        appSettingsRef.current = migrated;
+        setAppSettingsState(migrated);
+        try {
+          localStorage.setItem(LOCAL_STORAGE_APP_SETTINGS_KEY, JSON.stringify(migrated));
+        } catch (error) {
+          console.warn("Failed to persist migrated app settings", error);
+        }
+      }
       projectPathRef.current = filePath;
       projectRef.current = parsed;
       setProject(parsed);
@@ -187,9 +209,26 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     [projectsRootPath]
   );
 
+  const updateAppSettings = useCallback((updater: (current: AppSettings) => AppSettings) => {
+    setAppSettingsState((previous) => {
+      const next = updater(previous);
+      appSettingsRef.current = next;
+      try {
+        localStorage.setItem(LOCAL_STORAGE_APP_SETTINGS_KEY, JSON.stringify(next));
+      } catch (error) {
+        console.warn("Failed to persist app settings", error);
+      }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     projectRef.current = project;
   }, [project]);
+
+  useEffect(() => {
+    appSettingsRef.current = appSettings;
+  }, [appSettings]);
 
   useEffect(() => () => autosaveRef.current.cancel(), []);
 
@@ -212,6 +251,19 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           console.warn("Failed to resolve home directory", error);
         }
       }
+      try {
+        const raw = localStorage.getItem(LOCAL_STORAGE_APP_SETTINGS_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as Partial<AppSettings>;
+          const loaded: AppSettings = {
+            photoshopPath: parsed.photoshopPath ?? "",
+          };
+          appSettingsRef.current = loaded;
+          setAppSettingsState(loaded);
+        }
+      } catch (error) {
+        console.warn("Failed to read app settings", error);
+      }
       if (mounted) {
         await setProjectsRootPath(initialRoot);
       }
@@ -225,6 +277,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AppStateContextValue>(() => ({
     projectsIndex,
     projectsRootPath,
+    appSettings,
     project,
     projectFilePath,
     loading,
@@ -235,7 +288,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     closeProject,
     updateProjectsIndex,
     updateProject,
-  }), [projectsIndex, projectsRootPath, project, projectFilePath, loading, lastError, setProjectsRootPath, loadProjectsIndex, loadProject, closeProject, updateProjectsIndex, updateProject]);
+    updateAppSettings,
+  }), [projectsIndex, projectsRootPath, appSettings, project, projectFilePath, loading, lastError, setProjectsRootPath, loadProjectsIndex, loadProject, closeProject, updateProjectsIndex, updateProject, updateAppSettings]);
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
 }

@@ -23,7 +23,6 @@ export function createProjectState(params: { name: string; rootPath: string; des
       root: rootPath,
     },
     settings: {
-      photoshopPath: "",
       width: null,
       height: null,
       framerate: null,

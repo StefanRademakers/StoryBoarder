@@ -12,7 +12,6 @@ export interface ProjectState {
     root: string;
   };
   settings?: {
-    photoshopPath?: string;
     width?: number | null;
     height?: number | null;
     framerate?: number | null;
@@ -33,9 +32,14 @@ export interface ProjectsIndex {
   projects: ProjectsIndexEntry[];
 }
 
+export interface AppSettings {
+  photoshopPath: string;
+}
+
 export interface AppState {
   projectsIndex: ProjectsIndex | null;
   projectsRootPath: string | null;
+  appSettings: AppSettings;
   project: ProjectState | null;
   projectFilePath: string | null;
   loading: boolean;
@@ -53,6 +57,7 @@ export interface AppStateContextValue extends AppState {
   updateProjectsIndex: (
     updater: (current: ProjectsIndex | null) => ProjectsIndex | null,
   ) => Promise<void>;
+  updateAppSettings: (updater: (current: AppSettings) => AppSettings) => void;
 }
 
 export type PageKey =

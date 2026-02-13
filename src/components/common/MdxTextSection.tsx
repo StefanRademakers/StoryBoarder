@@ -1,4 +1,4 @@
-import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   MDXEditor,
   type MDXEditorMethods,
@@ -8,13 +8,11 @@ import {
   markdownShortcutPlugin,
   toolbarPlugin,
   linkPlugin,
-  linkDialogPlugin,
   imagePlugin,
   BoldItalicUnderlineToggles,
   BlockTypeSelect,
   ListsToggle,
   UndoRedo,
-  CreateLink,
   InsertThematicBreak,
   Separator,
   thematicBreakPlugin,
@@ -49,6 +47,9 @@ export function MdxTextSection({
   const editorRef = useRef<MDXEditorMethods | null>(null);
   const lastEditableRef = useRef(value ?? "");
   const lastPersistedMarkdownRef = useRef(value ?? "");
+  const [linkUiOpen, setLinkUiOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkText, setLinkText] = useState("");
 
   const resolveMarkdownFilePath = useCallback((): string => {
     if (targetPath) {
@@ -192,14 +193,48 @@ export function MdxTextSection({
     editorRef.current?.insertMarkdown("\n\n---\n\n");
   }, []);
 
+  const handleInsertLink = useCallback(() => {
+    setLinkUiOpen((open) => !open);
+  }, []);
+
+  const handleClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    const anchor = target?.closest("a[href]") as HTMLAnchorElement | null;
+    if (!anchor) return;
+    const href = (anchor.getAttribute("href") ?? "").trim();
+    if (!href) return;
+    const lower = href.toLowerCase();
+    if (!(lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("mailto:"))) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    window.open(href, "_blank", "noopener,noreferrer");
+  }, []);
+
+  const submitInsertLink = useCallback(() => {
+    const url = linkUrl.trim();
+    if (!url) return;
+    const text = linkText.trim() || url;
+    const safeText = text.replace(/\]/g, "\\]");
+    const safeUrl = url.replace(/\)/g, "%29");
+    editorRef.current?.insertMarkdown(`[${safeText}](${safeUrl})`);
+    setLinkUiOpen(false);
+    setLinkUrl("");
+    setLinkText("");
+  }, [linkText, linkUrl]);
+
   useEffect(() => () => {
     debouncedPersistRef.current.cancel();
-    const latest = lastEditableRef.current;
-    void persistMarkdown(latest);
-  }, [persistMarkdown]);
+  }, []);
 
   const content = (
-    <div className={className} onBlurCapture={handleBlurCapture} onKeyDownCapture={handleKeyDownCapture}>
+    <div
+      className={className}
+      onBlurCapture={handleBlurCapture}
+      onKeyDownCapture={handleKeyDownCapture}
+      onClickCapture={handleClickCapture}
+    >
       <MDXEditor
         ref={editorRef}
         markdown={value ?? ""}
@@ -214,7 +249,6 @@ export function MdxTextSection({
           listsPlugin(),
           quotePlugin(),
           linkPlugin({ disableAutoLink: false }),
-          linkDialogPlugin(),
           imagePlugin({
             imageUploadHandler: handleImageUpload,
             imagePreviewHandler: resolveImagePreviewSource,
@@ -229,7 +263,9 @@ export function MdxTextSection({
                 <BlockTypeSelect />
                 <BoldItalicUnderlineToggles />
                 <ListsToggle />
-                <CreateLink />
+                <button type="button" onClick={handleInsertLink} title="Insert link">
+                  Link
+                </button>
                 <Separator />
                 <InsertThematicBreak />
               </>
@@ -237,6 +273,40 @@ export function MdxTextSection({
           }),
         ]}
       />
+      {linkUiOpen ? (
+        <div className="mdx-link-inline">
+          <input
+            className="form-input"
+            placeholder="https://example.com"
+            value={linkUrl}
+            onChange={(event) => setLinkUrl(event.target.value)}
+          />
+          <input
+            className="form-input"
+            placeholder="Link text (optional)"
+            value={linkText}
+            onChange={(event) => setLinkText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                submitInsertLink();
+              }
+            }}
+          />
+          <button type="button" className="pill-button" onClick={submitInsertLink}>Insert</button>
+          <button
+            type="button"
+            className="pill-button"
+            onClick={() => {
+              setLinkUiOpen(false);
+              setLinkUrl("");
+              setLinkText("");
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 

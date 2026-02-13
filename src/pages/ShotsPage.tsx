@@ -5,6 +5,7 @@ import { joinPath, toFileUrl } from "../utils/path";
 import { DropOrBrowse } from "../components/common/DropOrBrowse";
 import { ConfirmDialog } from "../components/common/ConfirmDialog";
 import { extractPathsFromDrop, handleDragOver } from "../utils/dnd";
+import { useAppState } from "../state/appState";
 
 interface ShotsPageProps {
   project: ProjectState;
@@ -75,6 +76,7 @@ const VersionsIcon = (
 );
 
 export function ShotsPage({ project }: ShotsPageProps) {
+  const { appSettings } = useAppState();
   const scenesRoot = joinPath(project.paths.root, "scenes");
   const scenesIndexPath = joinPath(scenesRoot, "scenes.json");
 
@@ -527,6 +529,24 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "F1") {
+        event.preventDefault();
+        setDisplayMode("concept");
+        return;
+      }
+
+      if (event.key === "F2") {
+        event.preventDefault();
+        setDisplayMode("still");
+        return;
+      }
+
+      if (event.key === "F3") {
+        event.preventDefault();
+        setDisplayMode("clip");
+        return;
+      }
+
       if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) {
         return;
       }
@@ -944,7 +964,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
   const openMenuShotInPhotoshop = async () => {
     if (!modeIsImage || !menuShotAssetPath) return;
-    const configuredPath = project.settings?.photoshopPath?.trim() ?? "";
+    const configuredPath = appSettings.photoshopPath.trim();
     if (!configuredPath) return;
     await electron.openWithApp(configuredPath, menuShotAssetPath);
     closeImageMenu();

@@ -48,6 +48,8 @@ When creating a project, workspace scaffolding includes:
 ### Projects
 - Grid of projects discovered by scanning the selected root folder.
 - Supports create, open, reload, change root.
+- Global app settings are managed here (header gear button):
+  - `Photoshop location` (single app-wide value, not per project).
 - Context menu supports rename and duplicate (archive/backup are present but disabled placeholders).
 - Tile image uses `thumbnail` path from project state.
 
@@ -56,7 +58,7 @@ Sections:
 - Project Settings:
   - Project thumbnail drop/browse.
   - Thumbnail copied to `resources/project_main_image.<ext>`.
-  - Project settings fields: Photoshop path, width, height, framerate.
+  - Project settings fields: width, height, framerate.
 - Script:
   - MDX editor for `script/script.md`, also mirrored in `project.json` (`script`).
   - Supports pop-out editor window.
@@ -71,15 +73,18 @@ Sections:
 - Uses shared `FolderImageBoardsPage` with root `moodboards/`.
 - Folder-per-board workflow.
 - Create board, rename board, reveal board in file manager.
-- Drop/browse image import with collision-safe filename dedupe.
+- Drop/browse media import with collision-safe filename dedupe.
 - Grid sorted by most recently modified.
 - Fullscreen preview with keyboard navigation (left/right), delete confirmation.
-- Image context menu: open in Photoshop, copy to clipboard, reveal in file manager.
+- Media support includes images + videos (`.png/.jpg/.jpeg/.webp/.mp4/.mov/.webm/.mkv/.avi/.m4v`).
+- Media context menu:
+  - images: open in Photoshop, copy to clipboard, reveal in file manager
+  - videos: reveal in file manager
 
 ### Character & Props
 - Uses the same `FolderImageBoardsPage`.
 - Stored under `characters/`.
-- Same behavior as Moodboards (board folders, image import, preview, context actions, settings modal for Photoshop path).
+- Same behavior as Moodboards (board folders, media import, preview, context actions).
 
 ### Scenes
 - Fully implemented (not placeholder).
@@ -172,10 +177,12 @@ Sections:
 
 ## Editor Behavior (MDX)
 - Debounced autosave plus hard save on blur.
-- Preserves intentional blank lines with `<!-- -->` markers on save/load transforms.
+- Keeps stable markdown save/load flow without marker transforms.
 - Supports image upload into sibling `images/` folder next to the markdown file.
 - Cleans up removed local markdown-managed images if no sibling markdown file still references them.
 - Supports pop-out editor windows (`EditorPopoutPage`).
+- Link insertion is handled by inline toolbar UI (custom mini form), not `linkDialogPlugin`.
+- `Shift+Enter` inserts a spacer (`---`) for intentional visual separation.
 
 ## Key Electron Bridge Capabilities Used
 - File system: read/write text, write binary, ensure dir, exists, list, stat, rename, copy file/dir, delete file/dir.
@@ -190,3 +197,60 @@ Sections:
 - Projects index refresh is scan-based; some metadata updates (for example thumbnail changes) may not show in Projects until reload/rescan.
 - `ShotsPage.tsx` does not expose explicit load/save error UI like `ScenesPage.tsx` does.
 - Legacy shot schema compatibility (`image`-only shot entries) is not explicitly migrated in `ShotsPage.tsx`; media may need manual reassignment for old projects.
+- Media UI is currently duplicated across pages (see audit below). Consolidation is recommended.
+
+## Media Widget Audit (Current)
+
+### 1) `ImageAssetField` (`src/components/common/ImageAssetField.tsx`)
+- Used in:
+  - Story project thumbnail
+  - Scene image
+- Right-click menu:
+  - Replace image
+  - Open in Photoshop
+  - Copy to Clipboard
+  - Reveal in Finder/Explorer
+- Scope:
+  - Single-image field component.
+
+### 2) `FolderImageBoardsPage` (`src/pages/FolderImageBoardsPage.tsx`)
+- Used by:
+  - Moodboards page
+  - Character & Props page
+- Tile and preview:
+  - Supports image + video media rendering.
+- Right-click on board item:
+  - Reveal in Finder/Explorer
+  - Rename
+- Right-click on media item or fullscreen preview:
+  - Images:
+    - Open in Photoshop
+    - Copy to Clipboard
+    - Reveal in Finder/Explorer
+  - Videos:
+    - Reveal in Finder/Explorer
+
+### 3) Shots media UI (`src/pages/ShotsPage.tsx`)
+- Multiple media surfaces:
+  - Inline shot media slot
+  - Versions browser tiles
+  - Fullscreen preview modal
+- Right-click menu for active shot media:
+  - Add/Replace media
+  - Create empty image (concept mode when missing)
+  - Open in Photoshop (image modes)
+  - Copy to Clipboard (image modes)
+  - Reveal in Finder/Explorer
+
+## Recommended Consolidation
+- Create shared `MediaContextMenu` component:
+  - Inputs: media kind (image/video), mode, handlers for replace/open/copy/reveal/delete/create-empty.
+  - Reuse in `ImageAssetField`, `FolderImageBoardsPage`, and `ShotsPage`.
+- Create shared `MediaLightbox` component:
+  - Handles fullscreen image/video view, keyboard nav, metadata label, optional context menu hook.
+  - Reuse for moodboards and shots preview.
+- Keep page-specific behavior through props, not duplicate JSX logic.
+- Result:
+  - One menu behavior model.
+  - Easier feature additions (for example favorite, download, open externally).
+  - Lower regression risk when changing media actions.
