@@ -42,6 +42,7 @@ interface ShotsIndex {
 }
 
 type ShotDisplayMode = "concept" | "still" | "clip";
+type PlaybackMediaKind = "video" | "image" | "placeholder";
 
 interface ShotModeAsset {
   name: string;
@@ -49,6 +50,12 @@ interface ShotModeAsset {
   relative: string;
   mtimeMs: number;
   isFavorite: boolean;
+}
+
+interface PlaybackMedia {
+  kind: PlaybackMediaKind;
+  path: string;
+  sourceMode: ShotDisplayMode | null;
 }
 
 const EMPTY_SCENES: ScenesIndex = { scenes: [] };
@@ -86,7 +93,10 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [assetDeleteOpen, setAssetDeleteOpen] = useState(false);
   const [assetDeleteTarget, setAssetDeleteTarget] = useState<ShotModeAsset | null>(null);
+  const [playbackOpen, setPlaybackOpen] = useState(false);
+  const [playbackIndex, setPlaybackIndex] = useState(0);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shotItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const scenesRef = useRef<SceneMeta[]>([]);
   const shotsRef = useRef<ShotItem[]>([]);
@@ -109,6 +119,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
   );
 
   const activeShot = useMemo(() => shots.find((s) => s.id === activeShotId) ?? null, [shots, activeShotId]);
+  const playbackShot = playbackOpen ? shots[playbackIndex] ?? null : null;
   const previewAsset = previewIndex === null ? null : modeAssets[previewIndex] ?? null;
 
   const sceneDir = activeScene ? joinPath(scenesRoot, activeScene.id) : null;
@@ -141,6 +152,23 @@ export function ShotsPage({ project }: ShotsPageProps) {
       return shot.clipAssets ?? [];
     }
     return shot.stillAssets ?? [];
+  };
+
+  const getPlayableRelative = (shot: ShotItem, mode: ShotDisplayMode): string => {
+    const favorite = getFavoriteRelative(shot, mode).replace(/\\/g, "/").trim();
+    if (favorite && isFileAllowedForMode(favorite, mode)) {
+      return favorite;
+    }
+
+    const assets = getModeAssets(shot, mode);
+    for (let idx = assets.length - 1; idx >= 0; idx -= 1) {
+      const candidate = assets[idx].replace(/\\/g, "/").trim();
+      if (candidate && isFileAllowedForMode(candidate, mode)) {
+        return candidate;
+      }
+    }
+
+    return "";
   };
 
   const withModeAssets = (shot: ShotItem, mode: ShotDisplayMode, assets: string[]): ShotItem => {
@@ -244,6 +272,10 @@ export function ShotsPage({ project }: ShotsPageProps) {
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
       persistTimerRef.current = null;
+    }
+    if (playbackTimerRef.current) {
+      clearTimeout(playbackTimerRef.current);
+      playbackTimerRef.current = null;
     }
   }, []);
 
@@ -695,6 +727,40 @@ export function ShotsPage({ project }: ShotsPageProps) {
     }
   };
 
+  const closePlayback = () => {
+    if (playbackTimerRef.current) {
+      clearTimeout(playbackTimerRef.current);
+      playbackTimerRef.current = null;
+    }
+    setPlaybackOpen(false);
+    setPlaybackIndex(0);
+  };
+
+  const openPlayback = () => {
+    if (!shots.length) return;
+    setPreviewIndex(null);
+    setVersionsOpen(false);
+    setImageMenuShotId(null);
+    setImageMenuPos(null);
+    setAssetDeleteOpen(false);
+    setAssetDeleteTarget(null);
+    setPlaybackIndex(0);
+    setPlaybackOpen(true);
+  };
+
+  const stepPlayback = (direction: -1 | 1) => {
+    setPlaybackIndex((current) => {
+      if (direction > 0) {
+        if (current >= shots.length - 1) {
+          closePlayback();
+          return current;
+        }
+        return current + 1;
+      }
+      return Math.max(0, current - 1);
+    });
+  };
+
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       if (!activeSceneIdRef.current || !activeShotIdRef.current) return;
@@ -726,6 +792,71 @@ export function ShotsPage({ project }: ShotsPageProps) {
     return () => window.removeEventListener("paste", onPaste, true);
   }, [updateShotMedia]);
 
+  useEffect(() => {
+    if (!playbackOpen) {
+      if (playbackTimerRef.current) {
+        clearTimeout(playbackTimerRef.current);
+        playbackTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (!shots.length) {
+      closePlayback();
+      return;
+    }
+
+    if (playbackIndex >= shots.length) {
+      setPlaybackIndex(shots.length - 1);
+      return;
+    }
+
+    const currentShot = shots[playbackIndex];
+    if (!currentShot) return;
+
+    setActiveShotId(currentShot.id);
+    const useVideoEnded = displayMode === "clip" && !!getPlayableRelative(currentShot, "clip");
+    if (!useVideoEnded) {
+      const durationMs = resolveShotDurationMs(currentShot.durationSeconds);
+      playbackTimerRef.current = setTimeout(() => {
+        if (playbackIndex >= shots.length - 1) {
+          closePlayback();
+          return;
+        }
+        setPlaybackIndex((current) => current + 1);
+      }, durationMs);
+    }
+
+    return () => {
+      if (playbackTimerRef.current) {
+        clearTimeout(playbackTimerRef.current);
+        playbackTimerRef.current = null;
+      }
+    };
+  }, [playbackOpen, playbackIndex, shots, displayMode]);
+
+  useEffect(() => {
+    if (!playbackOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePlayback();
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        stepPlayback(1);
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        stepPlayback(-1);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [playbackOpen, shots.length]);
+
   const closeImageMenu = () => {
     setImageMenuShotId(null);
     setImageMenuPos(null);
@@ -733,25 +864,81 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
   const openImageMenu = (event: React.MouseEvent, shotId: string) => {
     event.preventDefault();
+    event.stopPropagation();
     setImageMenuShotId(shotId);
     setImageMenuPos({ x: event.clientX, y: event.clientY });
   };
 
   const shotAssetPath = (shot: ShotItem, mode: ShotDisplayMode = displayMode): string => {
     if (!sceneDir) return "";
-    const relative = getFavoriteRelative(shot, mode);
+    const relative = getPlayableRelative(shot, mode);
     if (!relative) return "";
     return joinPath(sceneDir, relative);
   };
+  const playbackMedia: PlaybackMedia = useMemo(() => {
+    if (!playbackShot) {
+      return { kind: "placeholder", path: "", sourceMode: null };
+    }
+
+    const modeOrder = displayMode === "clip"
+      ? (["clip", "still", "concept"] as ShotDisplayMode[])
+      : displayMode === "still"
+        ? (["still", "concept"] as ShotDisplayMode[])
+        : (["concept"] as ShotDisplayMode[]);
+
+    for (const mode of modeOrder) {
+      const path = shotAssetPath(playbackShot, mode);
+      if (!path) continue;
+      return {
+        kind: mode === "clip" ? "video" : "image",
+        path,
+        sourceMode: mode,
+      };
+    }
+
+    return { kind: "placeholder", path: "", sourceMode: null };
+  }, [playbackShot, displayMode, sceneDir]);
 
   const menuShot = shots.find((shot) => shot.id === imageMenuShotId) ?? null;
   const menuShotAssetPath = menuShot ? shotAssetPath(menuShot) : "";
   const modeIsImage = displayMode !== "clip";
+  const canCreateEmptyConcept = displayMode === "concept" && !!menuShot;
 
   const replaceMenuShotAsset = async () => {
     if (!menuShot) return;
     setActiveShotId(menuShot.id);
     await browseShotMedia({ shotId: menuShot.id });
+    closeImageMenu();
+  };
+
+  const createEmptyConceptImage = async () => {
+    if (!menuShot) return;
+    const sceneId = activeSceneIdRef.current;
+    if (!sceneId) return;
+
+    const shotId = menuShot.id;
+    const width = resolveProjectDimension(project.settings?.width, 1920);
+    const height = resolveProjectDimension(project.settings?.height, 1080);
+    const conceptDir = joinPath(joinPath(shotsDirForScene(sceneId), shotId), modeFolderName("concept"));
+    await electron.ensureDir(conceptDir);
+
+    const fileName = await uniqueFileName(conceptDir, `empty_${width}x${height}.png`);
+    const targetPath = joinPath(conceptDir, fileName);
+    const pngData = await createWhitePng(width, height);
+    await electron.writeBinary(targetPath, pngData);
+
+    const relative = `shots/${shotId}/concept/${fileName}`;
+    const next: ShotsIndex = {
+      shots: shotsIndex.shots.map((shot) => {
+        if (shot.id !== shotId) return shot;
+        const merged = uniqueStrings([...getModeAssets(shot, "concept"), relative]);
+        const withAssets = withModeAssets(shot, "concept", merged);
+        return withFavoriteRelative(withAssets, "concept", relative);
+      }),
+    };
+
+    setActiveShotId(shotId);
+    await saveShotsState(next, { immediate: true });
     closeImageMenu();
   };
 
@@ -935,6 +1122,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
               <div className="shots-toolbar__row">
                 <div className="shots-toolbar__actions">
                   <button type="button" className="pill-button" onClick={() => void createShot({ afterSelected: true })}>New shot</button>
+                  <button type="button" className="pill-button" onClick={openPlayback} disabled={!shots.length}>Play</button>
                 </div>
                 <div className="shots-toolbar__modes">
                   <button
@@ -1035,6 +1223,8 @@ export function ShotsPage({ project }: ShotsPageProps) {
                                   <DropOrBrowse
                                     label={displayMode === "clip" ? "Drop clip here or click to browse" : "Drop image here or click to browse"}
                                     className="moodboard-dropzone"
+                                    onContextMenu={(event) => openImageMenu(event, shot.id)}
+                                    enablePasteContextMenu={false}
                                     onPathsSelected={(paths) => void updateShotMedia(paths, { shotId: shot.id })}
                                     browse={async () => {
                                       await browseShotMedia({ shotId: shot.id });
@@ -1187,18 +1377,26 @@ export function ShotsPage({ project }: ShotsPageProps) {
                     <div className="shot-versions-grid__actions" onClick={(event) => event.stopPropagation()}>
                       <button
                         type="button"
-                        className="pill-button"
+                        className={`shot-versions-grid__icon-button${asset.isFavorite ? " shot-versions-grid__icon-button--active" : ""}`}
                         disabled={asset.isFavorite}
                         onClick={() => void setFavoriteForAsset(asset)}
+                        aria-label={asset.isFavorite ? "Favorite (active)" : "Set favorite"}
+                        title={asset.isFavorite ? "Favorite" : "Set favorite"}
                       >
-                        {asset.isFavorite ? "Favorite" : "Set Favorite"}
+                        <img
+                          src={asset.isFavorite ? "icons/favorite_active.png" : "icons/favorite_not_active.png"}
+                          alt=""
+                          aria-hidden
+                        />
                       </button>
                       <button
                         type="button"
-                        className="pill-button"
+                        className="shot-versions-grid__icon-button"
                         onClick={() => requestDeleteAsset(asset)}
+                        aria-label="Delete version"
+                        title="Delete version"
                       >
-                        Delete
+                        <img src="icons/delete.png" alt="" aria-hidden />
                       </button>
                     </div>
                   </button>
@@ -1224,6 +1422,61 @@ export function ShotsPage({ project }: ShotsPageProps) {
         </div>
       ) : null}
 
+      {playbackOpen && playbackShot ? (
+        <div className="shots-playback" onClick={closePlayback}>
+          <div className="shots-playback__inner" onClick={(event) => event.stopPropagation()}>
+            <div className="shots-playback__header">
+              <div className="shots-playback__title">
+                <strong>
+                  {String(playbackIndex + 1).padStart(2, "0")} / {String(shots.length).padStart(2, "0")}
+                </strong>
+                <span>{activeScene ? `Scene: ${activeScene.name}` : "Scene preview"}</span>
+              </div>
+              <div className="shots-playback__actions">
+                <button type="button" className="pill-button" onClick={() => stepPlayback(-1)} disabled={playbackIndex <= 0}>
+                  Prev
+                </button>
+                <button type="button" className="pill-button" onClick={() => stepPlayback(1)}>
+                  Next
+                </button>
+                <button type="button" className="pill-button" onClick={closePlayback}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="shots-playback__media">
+              {playbackMedia.kind === "video" ? (
+                <video
+                  key={playbackMedia.path}
+                  src={toFileUrl(playbackMedia.path)}
+                  autoPlay
+                  muted
+                  playsInline
+                  onEnded={() => stepPlayback(1)}
+                  onError={() => stepPlayback(1)}
+                />
+              ) : playbackMedia.kind === "image" ? (
+                <img src={toFileUrl(playbackMedia.path)} alt={playbackShot.description || "Shot preview"} />
+              ) : (
+                <div className="shots-playback__empty shots-playback__empty--numbered">
+                  <div className="shots-playback__empty-number">{String(playbackIndex + 1).padStart(2, "0")}</div>
+                  <div className="shots-playback__empty-label">Shot</div>
+                </div>
+              )}
+            </div>
+
+            <div className="shots-playback__meta">
+              <div className="shots-playback__duration">
+                Source: {playbackMedia.sourceMode ? playbackModeLabel(playbackMedia.sourceMode) : "Placeholder"}
+              </div>
+              <div className="shots-playback__duration">Duration: {formatDurationLabel(playbackShot.durationSeconds)}</div>
+              <div className="shots-playback__description">{playbackShot.description || "No shot description."}</div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <ConfirmDialog
         open={assetDeleteOpen}
         title="Delete Version"
@@ -1237,7 +1490,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
         cancelLabel="Cancel"
       />
 
-      {imageMenuPos && menuShot && menuShotAssetPath ? (
+      {imageMenuPos && menuShot ? (
         <div className="context-menu-backdrop" onClick={closeImageMenu}>
           <div
             className="context-menu"
@@ -1245,21 +1498,30 @@ export function ShotsPage({ project }: ShotsPageProps) {
             onClick={(event) => event.stopPropagation()}
           >
             <button type="button" className="context-menu__item" onClick={() => void replaceMenuShotAsset()}>
-              {displayMode === "clip" ? "Replace clip" : "Replace image"}
+              {displayMode === "clip"
+                ? (menuShotAssetPath ? "Replace clip" : "Add clip")
+                : (menuShotAssetPath ? "Replace image" : "Add image")}
             </button>
-            {modeIsImage ? (
+            {canCreateEmptyConcept ? (
+              <button type="button" className="context-menu__item" onClick={() => void createEmptyConceptImage()}>
+                Create empty image
+              </button>
+            ) : null}
+            {modeIsImage && menuShotAssetPath ? (
               <button type="button" className="context-menu__item" onClick={() => void openMenuShotInPhotoshop()}>
                 Open in Photoshop
               </button>
             ) : null}
-            {modeIsImage ? (
+            {modeIsImage && menuShotAssetPath ? (
               <button type="button" className="context-menu__item" onClick={() => void copyMenuShotToClipboard()}>
                 Copy to Clipboard
               </button>
             ) : null}
-            <button type="button" className="context-menu__item" onClick={() => void revealMenuShotInExplorer()}>
-              {isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer"}
-            </button>
+            {menuShotAssetPath ? (
+              <button type="button" className="context-menu__item" onClick={() => void revealMenuShotInExplorer()}>
+                {isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer"}
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -1355,6 +1617,11 @@ function capitalizeMode(mode: ShotDisplayMode): string {
   return mode.charAt(0).toUpperCase() + mode.slice(1);
 }
 
+function playbackModeLabel(mode: ShotDisplayMode): string {
+  if (mode === "concept") return "Sketch";
+  return capitalizeMode(mode);
+}
+
 function getBaseName(pathValue: string): string {
   const normalized = pathValue.replace(/\\/g, "/");
   const idx = normalized.lastIndexOf("/");
@@ -1380,6 +1647,45 @@ function uniqueStrings(values: string[]): string[] {
 function normalizeAssetList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return uniqueStrings(value.filter((entry): entry is string => typeof entry === "string"));
+}
+
+function resolveShotDurationMs(value: number | null | undefined): number {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.max(100, Math.round(value * 1000));
+  }
+  return 2000;
+}
+
+function formatDurationLabel(value: number | null | undefined): string {
+  const ms = resolveShotDurationMs(value);
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function resolveProjectDimension(value: number | null | undefined, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.max(1, Math.round(value));
+  }
+  return fallback;
+}
+
+async function createWhitePng(width: number, height: number): Promise<ArrayBuffer> {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Could not create 2D canvas context.");
+  }
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((result) => resolve(result), "image/png");
+  });
+  if (!blob) {
+    throw new Error("Could not encode white PNG.");
+  }
+  return blob.arrayBuffer();
 }
 
 async function uniqueFileName(dir: string, fileName: string): Promise<string> {

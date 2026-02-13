@@ -14,9 +14,18 @@ export interface DropOrBrowseProps {
   onPathsSelected: (paths: string[]) => void;
   browse?: () => Promise<string | string[] | null | undefined>;
   className?: string;
+  onContextMenu?: React.MouseEventHandler<HTMLDivElement>;
+  enablePasteContextMenu?: boolean;
 }
 
-export function DropOrBrowse({ label = "Drop or Browse", onPathsSelected, browse, className = "card__dropzone" }: DropOrBrowseProps) {
+export function DropOrBrowse({
+  label = "Drop or Browse",
+  onPathsSelected,
+  browse,
+  className = "card__dropzone",
+  onContextMenu,
+  enablePasteContextMenu = true,
+}: DropOrBrowseProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -81,6 +90,10 @@ export function DropOrBrowse({ label = "Drop or Browse", onPathsSelected, browse
       }}
       style={{ cursor: browse ? "pointer" : "default" }}
       onContextMenu={async (e) => {
+        onContextMenu?.(e);
+        if (e.defaultPrevented || !enablePasteContextMenu) {
+          return;
+        }
         e.preventDefault();
         const menu = document.createElement("div");
         menu.style.position = "fixed";

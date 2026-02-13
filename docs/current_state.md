@@ -2,6 +2,14 @@
 
 Updated from current source code on 2026-02-13.
 
+## Stability Snapshot
+- Scenes + Shots are functionally solid for core production flow (create/edit/reorder/delete + on-disk persistence).
+- Data integrity protections are present:
+  - Scene index normalization/repair on load.
+  - Serialized scene index writes (queued persistence).
+  - Shot media reference cleanup/repair on load.
+- Remaining risk areas are mostly around migration edge cases and error surfacing (details in Known Gaps).
+
 ## What This App Is
 StoryBuilder is an Electron + React desktop app for creating visual story projects. The app is page-based:
 - Projects
@@ -78,29 +86,55 @@ Sections:
 - Scene index is `scenes/scenes.json`.
 - Supports create, select, reorder, rename, active flag toggle, delete.
 - Each scene gets its own folder: `scenes/<sceneId>/`.
+- Create flow scaffolds per-scene docs immediately:
+  - `scene.md`
+  - `shotlist.md`
+- Scene metadata includes:
+  - `name`
+  - `active`
+  - `image` (filename in scene folder)
+  - `timeOfDay`
+  - `lighting`
 - Per-scene docs:
   - `scene.md`
   - `shotlist.md`
 - Per-scene image stored inside the scene folder (`scene_image.<ext>`); index stores filename.
-- Includes load-time normalization/repair for malformed or duplicate scene IDs and ordering.
+- Includes load-time normalization/repair for malformed scene records (IDs, ordering, missing metadata defaults).
+- Duplicate scene ID repair includes directory copy-forward (`fromId -> toId`) when needed.
+- Scene editor uses MDX sections for script + shotlist with pop-out editor support.
 
 ### Shots
 - Fully implemented (not placeholder).
 - Scene-specific shots index: `scenes/<sceneId>/shots.json`.
 - Scene-specific shot assets: `scenes/<sceneId>/shots/<shotId>/`.
 - Supports create, select, reorder, edit, delete.
+- Multi-mode media system (per shot): `concept`, `still`, `clip`.
+- Each mode stores:
+  - asset list (`conceptAssets` / `stillAssets` / `clipAssets`)
+  - favorite pointer (`favoriteConcept` / `favoriteStill` / `favoriteClip`)
+- New shot creation scaffolds mode folders under shot directory.
+- Media ingest supports drag/drop + browse for all modes, plus clipboard paste for image modes.
+- Built-in versions browser per mode:
+  - list by modified time
+  - set favorite
+  - delete version file (if not still referenced)
+- Context menu actions:
+  - replace current media
+  - open in Photoshop (image modes only)
+  - copy to clipboard (image modes only)
+  - reveal in file manager
 - Shot fields:
   - `id`
   - `order`
   - `description`
-  - `image`
   - `durationSeconds`
   - `framing`
-  - `timeOfDay`
   - `action`
   - `camera`
-- Shot image drop/browse + context menu actions (replace/open in Photoshop/copy/reveal).
+  - mode-specific favorites + asset arrays (above)
 - Keyboard timeline navigation across shots and scenes via `Ctrl + Arrow` keys.
+- `Ctrl + N` creates a new shot after the current selection.
+- Load-time media repair removes invalid/missing asset refs and reassigns favorites safely.
 
 ### Preview
 - Placeholder page.
@@ -117,18 +151,24 @@ Sections:
 - `order: number`
 - `active: boolean`
 - `image?: string` (filename in scene folder)
+- `timeOfDay?: string`
+- `lighting?: string`
 
 ### `scenes/<sceneId>/shots.json`
 `shots` array items contain:
 - `id: string`
 - `order: number`
 - `description: string`
-- `image?: string` (relative path like `shots/<shotId>/image.png`)
 - `durationSeconds?: number | null`
 - `framing?: string`
-- `timeOfDay?: string`
 - `action?: string`
 - `camera?: string`
+- `favoriteConcept?: string` (relative path like `shots/<shotId>/concept/<file>`)
+- `favoriteStill?: string` (relative path like `shots/<shotId>/still/<file>`)
+- `favoriteClip?: string` (relative path like `shots/<shotId>/clip/<file>`)
+- `conceptAssets?: string[]`
+- `stillAssets?: string[]`
+- `clipAssets?: string[]`
 
 ## Editor Behavior (MDX)
 - Debounced autosave plus hard save on blur.
@@ -148,3 +188,5 @@ Sections:
 - `Preview` and `Delivery` are still placeholders.
 - `PropsPage.tsx` exists but is not currently wired into app navigation.
 - Projects index refresh is scan-based; some metadata updates (for example thumbnail changes) may not show in Projects until reload/rescan.
+- `ShotsPage.tsx` does not expose explicit load/save error UI like `ScenesPage.tsx` does.
+- Legacy shot schema compatibility (`image`-only shot entries) is not explicitly migrated in `ShotsPage.tsx`; media may need manual reassignment for old projects.
