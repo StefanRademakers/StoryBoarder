@@ -30,12 +30,14 @@ export async function extractPathsFromDrop(event: DragEvent<HTMLElement>): Promi
   }
 
   if (items.size === 0) return [];
+  const localCandidates = filterLocalCandidates(Array.from(items));
+  if (!localCandidates.length) return [];
 
   try {
-    return await window.electronAPI.normalizePaths(Array.from(items));
+    return await window.electronAPI.normalizePaths(localCandidates);
   } catch (error) {
     console.error("Failed to normalize dropped paths", error);
-    return Array.from(items);
+    return localCandidates;
   }
 }
 
@@ -45,4 +47,11 @@ export function handleDragOver(event: DragEvent<HTMLElement>): void {
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = "copy";
   }
+}
+
+function filterLocalCandidates(items: string[]): string[] {
+  return items
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item) => !/^(?:https?|data|blob):/i.test(item));
 }

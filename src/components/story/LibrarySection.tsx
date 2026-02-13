@@ -39,6 +39,7 @@ export function LibrarySection({
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<LibraryItem | null>(null);
+  const revealLabel = isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer";
 
   const loadItems = async () => {
     await electron.ensureDir(baseDir);
@@ -133,6 +134,11 @@ export function LibrarySection({
   const requestDelete = (note: LibraryItem) => {
     setConfirmTarget(note);
     setConfirmOpen(true);
+    closeMenu();
+  };
+
+  const revealInFileManager = async (note: LibraryItem) => {
+    await electron.revealInFileManager(note.path);
     closeMenu();
   };
 
@@ -296,6 +302,9 @@ export function LibrarySection({
             style={{ top: menuPos.y, left: menuPos.x }}
             onClick={(event) => event.stopPropagation()}
           >
+            <button type="button" className="context-menu__item" onClick={() => void revealInFileManager(menuItem)}>
+              {revealLabel}
+            </button>
             <button type="button" className="context-menu__item" onClick={() => requestDelete(menuItem)}>
               Delete
             </button>
@@ -325,4 +334,11 @@ function stripExtension(name: string): string {
 
 function normalizeName(value: string): string {
   return value.replace(/[\\/:*?"<>|]+/g, "").trim();
+}
+
+function isMacPlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+  const platform = (nav.userAgentData?.platform ?? navigator.platform ?? "").toLowerCase();
+  return platform.includes("mac");
 }

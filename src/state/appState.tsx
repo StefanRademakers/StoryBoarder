@@ -2,14 +2,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { AppStateContextValue, ProjectState, ProjectsIndex } from "./types";
 import { debounce } from "../utils/debounce";
 import { deepClone } from "../utils/deepClone";
-import { getDirectoryName, joinPath } from "../utils/path";
+import { getDirectoryName, joinPath, resolveProjectPath } from "../utils/path";
 import { electron } from "../services/electron";
 import { ensureDirectoryExists } from "../services/projectService";
 import { resolveProjectsIndexLocation, setProjectsRoot, toProjectsIndexRelative } from "../utils/projectsIndexPaths";
 
 const DEFAULT_AUTOSAVE_DELAY_MS = 500;
 const LOCAL_STORAGE_ROOT_PATH_KEY = "storybuilder.projectsRootPath";
-const DEFAULT_PROJECTS_ROOT = "D:/Storyboards";
+const DEFAULT_PROJECTS_ROOT = "Storyboards";
 const EMPTY_PROJECTS_INDEX: ProjectsIndex = { projects: [] };
 
 const AppStateContext = createContext<AppStateContextValue | null>(null);
@@ -47,7 +47,7 @@ async function scanProjects(rootPath: string): Promise<ProjectsIndex> {
           location: rel,
           lastModified: last,
           lastUpdated: last,
-          thumbnail: parsed.thumbnail,
+          thumbnail: resolveProjectPath(dir, parsed.thumbnail),
         });
       } catch {
         // ignore broken project.json

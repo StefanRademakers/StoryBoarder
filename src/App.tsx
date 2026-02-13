@@ -5,11 +5,20 @@ import { PreviewPage } from "./pages/PreviewPage";
 import { ScenesPage } from "./pages/ScenesPage";
 import { ShotsPage } from "./pages/ShotsPage";
 import { DeliveryPage } from "./pages/DeliveryPage";
+import { MoodboardsPage } from "./pages/MoodboardsPage";
+import { CharactersPage } from "./pages/CharactersPage";
+import { EditorPopoutPage } from "./pages/EditorPopoutPage";
 import { BottomNav } from "./components/layout/BottomNav";
 import { useAppState } from "./state/appState";
 import { createProjectState } from "./state/projectTemplates";
 import type { PageKey, ProjectsIndexEntry } from "./state/types";
-import { createProjectWorkspace, normalizePathForCompare, resolveProjectFilePath } from "./services/projectService";
+import {
+  createProjectWorkspace,
+  duplicateProjectWorkspace,
+  normalizePathForCompare,
+  renameProjectWorkspace,
+  resolveProjectFilePath,
+} from "./services/projectService";
 import { electron } from "./services/electron";
 
 export default function App() {
@@ -23,10 +32,24 @@ export default function App() {
     loadProject,
     updateProjectsIndex,
     closeProject,
+    projectFilePath,
   } = useAppState();
+
+  const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const isEditorPopout = searchParams.get("popout") === "editor";
+  const popoutProjectFilePath = searchParams.get("projectFilePath");
+  const popoutTargetPath = searchParams.get("targetPath");
+  const popoutTitle = searchParams.get("title") ?? "Editor";
 
   const [activePage, setActivePage] = useState<PageKey>("projects");
   const projectAvailable = Boolean(project);
+
+  useEffect(() => {
+    if (!isEditorPopout) return;
+    if (!popoutProjectFilePath) return;
+    if (projectFilePath === popoutProjectFilePath) return;
+    void loadProject(popoutProjectFilePath);
+  }, [isEditorPopout, popoutProjectFilePath, loadProject, projectFilePath]);
 
   useEffect(() => {
     if (!projectAvailable && activePage !== "projects") {
@@ -35,8 +58,11 @@ export default function App() {
   }, [projectAvailable, activePage]);
 
   useEffect(() => {
+    if (isEditorPopout) return;
     const titleMap: Partial<Record<PageKey, string>> = {
       preview: "StoryBuilder - Preview",
+      moodboards: "StoryBuilder - Moodboards",
+      characterProps: "StoryBuilder - Character & Props",
       scenes: "StoryBuilder - Scenes",
       shots: "StoryBuilder - Shots",
       delivery: "StoryBuilder - Delivery",
@@ -47,7 +73,7 @@ export default function App() {
     } catch {
       // ignore when preload is not available
     }
-  }, [activePage, project]);
+  }, [activePage, project, isEditorPopout]);
 
   const handleChangeRootPath = useCallback(async () => {
     const picked = await electron.pickDir({
@@ -99,7 +125,40 @@ export default function App() {
     }
   }, [projectsRootPath, handleChangeRootPath, updateProjectsIndex, loadProject, projectsIndex]);
 
+  const handleRenameProject = useCallback(async (entry: ProjectsIndexEntry, nextName: string) => {
+    try {
+      await renameProjectWorkspace(entry, nextName);
+      await updateProjectsIndex((current) => current);
+    } catch (error) {
+      console.error("Failed to rename project", error);
+      throw error;
+    }
+  }, [updateProjectsIndex]);
+
+  const handleDuplicateProject = useCallback(async (entry: ProjectsIndexEntry) => {
+    try {
+      await duplicateProjectWorkspace(entry);
+      await updateProjectsIndex((current) => current);
+    } catch (error) {
+      console.error("Failed to duplicate project", error);
+      alert(`Failed to duplicate project: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [updateProjectsIndex]);
+
   const content = useMemo(() => {
+    if (isEditorPopout) {
+      if (!project || !popoutTargetPath) {
+        return (
+          <div className="page">
+            <section className="panel">
+              <p className="muted">Loading editor...</p>
+            </section>
+          </div>
+        );
+      }
+      return <EditorPopoutPage project={project} targetPath={popoutTargetPath} title={popoutTitle} />;
+    }
+
     if (activePage === "projects") {
       return (
         <ProjectsOverview
@@ -113,12 +172,22 @@ export default function App() {
           onReload={async () => {
             await updateProjectsIndex((current) => current);
           }}
+          onRenameProject={handleRenameProject}
+          onDuplicateProject={handleDuplicateProject}
         />
       );
     }
 
     if (activePage === "preview") {
       return <PreviewPage />;
+    }
+
+    if (activePage === "moodboards" && project) {
+      return <MoodboardsPage project={project} />;
+    }
+
+    if (activePage === "characterProps" && project) {
+      return <CharactersPage project={project} />;
     }
 
     if (activePage === "scenes" && project) {
@@ -140,12 +209,17 @@ export default function App() {
     return null;
   }, [
     activePage,
+    isEditorPopout,
+    popoutTargetPath,
+    popoutTitle,
     projectsIndex,
     projectsRootPath,
     loading,
     lastError,
     handleOpenProject,
     handleCreateProject,
+    handleRenameProject,
+    handleDuplicateProject,
     handleChangeRootPath,
     updateProjectsIndex,
     project,
@@ -154,22 +228,24 @@ export default function App() {
   return (
     <div className="app-root">
       <main className="app-content">{content}</main>
-      <footer className="app-footer">
-        <div className="footer-left">
-          {loading ? <span className="badge badge--queued">Loading...</span> : null}
-        </div>
-        <BottomNav
-          active={activePage}
-          onSelect={(page) => {
-            if (page === "projects") {
-              closeProject();
-            }
-            setActivePage(page);
-          }}
-          projectAvailable={projectAvailable}
-        />
-        <div className="footer-right" />
-      </footer>
+      {!isEditorPopout ? (
+        <footer className="app-footer">
+          <div className="footer-left">
+            {loading ? <span className="badge badge--queued">Loading...</span> : null}
+          </div>
+          <BottomNav
+            active={activePage}
+            onSelect={(page) => {
+              if (page === "projects") {
+                closeProject();
+              }
+              setActivePage(page);
+            }}
+            projectAvailable={projectAvailable}
+          />
+          <div className="footer-right" />
+        </footer>
+      ) : null}
     </div>
   );
 }

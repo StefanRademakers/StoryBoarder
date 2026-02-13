@@ -11,6 +11,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { key: "projects", label: "Projects" },
   { key: "story", label: "Story" },
+  { key: "moodboards", label: "Moodboards" },
+  { key: "characterProps", label: "Character & Props", icon: "characterProps" },
   { key: "scenes", label: "Scenes" },
   { key: "shots", label: "Shots" },
   { key: "preview", label: "Preview" },
@@ -29,8 +31,9 @@ export function BottomNav({ active, onSelect, projectAvailable }: BottomNavProps
       const t = event.target as HTMLElement | null;
       const tag = t?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || t?.isContentEditable) return;
-      if (!event.shiftKey) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const hasNavModifier = event.shiftKey || event.altKey;
+      if (!hasNavModifier) return;
+      if (event.metaKey || event.ctrlKey) return;
 
       const match = /^(?:Digit|Numpad)([1-9])$/.exec(event.code);
       if (!match) return;

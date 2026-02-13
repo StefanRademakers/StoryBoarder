@@ -1,7 +1,14 @@
-export function debounce<T extends (...args: unknown[]) => void>(fn: T, delayMs: number) {
+type Debounced<TArgs extends unknown[]> = ((...args: TArgs) => void) & {
+  cancel: () => void;
+};
+
+export function debounce<TArgs extends unknown[]>(
+  fn: (...args: TArgs) => void,
+  delayMs: number,
+): Debounced<TArgs> {
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  const wrapped = (...args: Parameters<T>) => {
+  const wrapped = ((...args: TArgs) => {
     if (timer) {
       clearTimeout(timer);
     }
@@ -9,7 +16,7 @@ export function debounce<T extends (...args: unknown[]) => void>(fn: T, delayMs:
       timer = null;
       fn(...args);
     }, delayMs);
-  };
+  }) as Debounced<TArgs>;
 
   wrapped.cancel = () => {
     if (timer) {

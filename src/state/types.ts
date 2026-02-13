@@ -11,6 +11,12 @@ export interface ProjectState {
   paths: {
     root: string;
   };
+  settings?: {
+    photoshopPath?: string;
+    width?: number | null;
+    height?: number | null;
+    framerate?: number | null;
+  };
   images?: string[];
 }
 
@@ -49,4 +55,12 @@ export interface AppStateContextValue extends AppState {
   ) => Promise<void>;
 }
 
-export type PageKey = "projects" | "story" | "scenes" | "shots" | "preview" | "delivery";
+export type PageKey =
+  | "projects"
+  | "story"
+  | "moodboards"
+  | "characterProps"
+  | "scenes"
+  | "shots"
+  | "preview"
+  | "delivery";
