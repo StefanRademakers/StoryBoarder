@@ -25,10 +25,12 @@ interface ShotItem {
   id: string;
   order: number;
   description: string;
-  image?: string; // Legacy alias for stillImage
-  conceptImage?: string;
-  stillImage?: string;
-  clipPath?: string;
+  favoriteConcept?: string;
+  favoriteStill?: string;
+  favoriteClip?: string;
+  conceptAssets?: string[];
+  stillAssets?: string[];
+  clipAssets?: string[];
   durationSeconds?: number | null;
   framing?: string;
   action?: string;
@@ -41,9 +43,29 @@ interface ShotsIndex {
 
 type ShotDisplayMode = "concept" | "still" | "clip";
 
+interface ShotModeAsset {
+  name: string;
+  path: string;
+  relative: string;
+  mtimeMs: number;
+  isFavorite: boolean;
+}
+
 const EMPTY_SCENES: ScenesIndex = { scenes: [] };
 const EMPTY_SHOTS: ShotsIndex = { shots: [] };
 const VIDEO_EXTENSIONS = ["mp4", "mov", "webm", "mkv", "avi", "m4v"] as const;
+const VersionsIcon = (
+  <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden>
+    <path
+      d="M5 6.5h11a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 16 18.5H5A1.5 1.5 0 0 1 3.5 17V8A1.5 1.5 0 0 1 5 6.5Zm3-3h11A1.5 1.5 0 0 1 20.5 5v9"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 export function ShotsPage({ project }: ShotsPageProps) {
   const scenesRoot = joinPath(project.paths.root, "scenes");
@@ -58,6 +80,12 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const [imageMenuShotId, setImageMenuShotId] = useState<string | null>(null);
   const [imageMenuPos, setImageMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [displayMode, setDisplayMode] = useState<ShotDisplayMode>("still");
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [modeAssets, setModeAssets] = useState<ShotModeAsset[]>([]);
+  const [modeAssetsLoading, setModeAssetsLoading] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [assetDeleteOpen, setAssetDeleteOpen] = useState(false);
+  const [assetDeleteTarget, setAssetDeleteTarget] = useState<ShotModeAsset | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shotItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const scenesRef = useRef<SceneMeta[]>([]);
@@ -65,6 +93,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const activeSceneIdRef = useRef<string | null>(null);
   const activeShotIdRef = useRef<string | null>(null);
   const displayModeRef = useRef<ShotDisplayMode>("still");
+  const assetsSeqRef = useRef(0);
   const navigatingRef = useRef(false);
 
   const scenes = useMemo(
@@ -80,8 +109,136 @@ export function ShotsPage({ project }: ShotsPageProps) {
   );
 
   const activeShot = useMemo(() => shots.find((s) => s.id === activeShotId) ?? null, [shots, activeShotId]);
+  const previewAsset = previewIndex === null ? null : modeAssets[previewIndex] ?? null;
 
   const sceneDir = activeScene ? joinPath(scenesRoot, activeScene.id) : null;
+
+  const getFavoriteRelative = (shot: ShotItem, mode: ShotDisplayMode): string => {
+    if (mode === "concept") {
+      return shot.favoriteConcept ?? "";
+    }
+    if (mode === "clip") {
+      return shot.favoriteClip ?? "";
+    }
+    return shot.favoriteStill ?? "";
+  };
+
+  const withFavoriteRelative = (shot: ShotItem, mode: ShotDisplayMode, relative: string): ShotItem => {
+    if (mode === "concept") {
+      return { ...shot, favoriteConcept: relative };
+    }
+    if (mode === "clip") {
+      return { ...shot, favoriteClip: relative };
+    }
+    return { ...shot, favoriteStill: relative };
+  };
+
+  const getModeAssets = (shot: ShotItem, mode: ShotDisplayMode): string[] => {
+    if (mode === "concept") {
+      return shot.conceptAssets ?? [];
+    }
+    if (mode === "clip") {
+      return shot.clipAssets ?? [];
+    }
+    return shot.stillAssets ?? [];
+  };
+
+  const withModeAssets = (shot: ShotItem, mode: ShotDisplayMode, assets: string[]): ShotItem => {
+    const cleaned = uniqueStrings(assets);
+    if (mode === "concept") {
+      return { ...shot, conceptAssets: cleaned };
+    }
+    if (mode === "clip") {
+      return { ...shot, clipAssets: cleaned };
+    }
+    return { ...shot, stillAssets: cleaned };
+  };
+
+  const listModeAssets = async (
+    sceneId: string,
+    shot: ShotItem,
+    mode: ShotDisplayMode,
+  ): Promise<ShotModeAsset[]> => {
+    const modeDir = joinPath(joinPath(shotsDirForScene(sceneId), shot.id), modeFolderName(mode));
+    await electron.ensureDir(modeDir);
+    const expectedPrefix = `shots/${shot.id}/${modeFolderName(mode)}/`;
+    const rows: ShotModeAsset[] = [];
+    const favorite = getFavoriteRelative(shot, mode);
+    const rels = getModeAssets(shot, mode);
+    for (const relative of rels) {
+      const normalizedRelative = relative.replace(/\\/g, "/");
+      if (!normalizedRelative.toLowerCase().startsWith(expectedPrefix.toLowerCase())) {
+        continue;
+      }
+      if (!isFileAllowedForMode(normalizedRelative, mode)) {
+        continue;
+      }
+      const absolute = joinPath(joinPath(scenesRoot, sceneId), normalizedRelative);
+      const exists = await electron.exists(absolute);
+      if (!exists) {
+        continue;
+      }
+      const stat = await electron.stat(absolute);
+      rows.push({
+        name: getBaseName(normalizedRelative),
+        path: absolute,
+        relative: normalizedRelative,
+        mtimeMs: stat?.mtimeMs ?? 0,
+        isFavorite: normalizedRelative === favorite,
+      });
+    }
+    rows.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
+    return rows;
+  };
+
+  const cleanMediaStateForScene = async (sceneId: string, sourceShots: ShotItem[]): Promise<{ shots: ShotItem[]; changed: boolean }> => {
+    let changed = false;
+    const cleanedShots: ShotItem[] = [];
+
+    for (const shot of sourceShots) {
+      let nextShot = { ...shot };
+      for (const mode of SHOT_MODES) {
+        const expectedPrefix = `shots/${shot.id}/${modeFolderName(mode)}/`;
+        const currentAssets = getModeAssets(nextShot, mode);
+        const validAssets: string[] = [];
+        for (const relative of currentAssets) {
+          const normalizedRelative = relative.replace(/\\/g, "/");
+          if (!normalizedRelative.toLowerCase().startsWith(expectedPrefix.toLowerCase())) {
+            changed = true;
+            continue;
+          }
+          if (!isFileAllowedForMode(normalizedRelative, mode)) {
+            changed = true;
+            continue;
+          }
+          const absolute = joinPath(joinPath(scenesRoot, sceneId), normalizedRelative);
+          const exists = await electron.exists(absolute);
+          if (!exists) {
+            changed = true;
+            continue;
+          }
+          validAssets.push(normalizedRelative);
+        }
+        const uniqueAssets = uniqueStrings(validAssets);
+        if (uniqueAssets.length !== currentAssets.length) {
+          changed = true;
+        }
+        nextShot = withModeAssets(nextShot, mode, uniqueAssets);
+
+        const currentFavorite = getFavoriteRelative(nextShot, mode).replace(/\\/g, "/");
+        const hasFavorite = currentFavorite ? uniqueAssets.includes(currentFavorite) : false;
+        const fallback = uniqueAssets[uniqueAssets.length - 1] ?? "";
+        const resolved = hasFavorite ? currentFavorite : fallback;
+        if (resolved !== currentFavorite) {
+          changed = true;
+          nextShot = withFavoriteRelative(nextShot, mode, resolved);
+        }
+      }
+      cleanedShots.push(nextShot);
+    }
+
+    return { shots: cleanedShots, changed };
+  };
 
   useEffect(() => () => {
     if (persistTimerRef.current) {
@@ -173,11 +330,16 @@ export function ShotsPage({ project }: ShotsPageProps) {
       const text = await electron.readText(shotsIndexPath);
       const parsed = JSON.parse(text) as ShotsIndex;
       const normalized = normalizeShotsIndex(parsed);
-      setShotsIndex(normalized);
+      const repaired = await cleanMediaStateForScene(sceneId, normalized.shots);
+      const nextIndex: ShotsIndex = { shots: repaired.shots };
+      setShotsIndex(nextIndex);
       setActiveShotId((prev) => {
-        if (prev && normalized.shots.some((shot) => shot.id === prev)) return prev;
-        return normalized.shots[0]?.id ?? null;
+        if (prev && nextIndex.shots.some((shot) => shot.id === prev)) return prev;
+        return nextIndex.shots[0]?.id ?? null;
       });
+      if (repaired.changed) {
+        await persistShotsIndex(sceneId, nextIndex);
+      }
     } catch {
       setShotsIndex(EMPTY_SHOTS);
       setActiveShotId(null);
@@ -367,10 +529,12 @@ export function ShotsPage({ project }: ShotsPageProps) {
       id,
       order: 0,
       description: "",
-      image: "",
-      conceptImage: "",
-      stillImage: "",
-      clipPath: "",
+      favoriteConcept: "",
+      favoriteStill: "",
+      favoriteClip: "",
+      conceptAssets: [],
+      stillAssets: [],
+      clipAssets: [],
       durationSeconds: 2,
       framing: "",
       action: "",
@@ -396,6 +560,9 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
     const shotDir = joinPath(shotsDirForScene(sceneId), id);
     await electron.ensureDir(shotDir);
+    await Promise.all(
+      SHOT_MODES.map((mode) => electron.ensureDir(joinPath(shotDir, modeFolderName(mode)))),
+    );
 
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
@@ -463,43 +630,56 @@ export function ShotsPage({ project }: ShotsPageProps) {
     const shotId = options?.shotId ?? activeShotIdRef.current;
     const mode = options?.mode ?? displayModeRef.current;
     if (!sceneId || !shotId || !paths.length) return;
-    const input = paths[0];
-    if (isWebOrDataUrl(input)) {
-      console.warn("Ignoring non-local media source on Shots page:", input);
-      return;
-    }
-    const sourceExists = await electron.exists(input);
-    if (!sourceExists) {
-      console.warn("Ignoring missing media source on Shots page:", input);
-      return;
-    }
+    const shotModeDir = joinPath(joinPath(shotsDirForScene(sceneId), shotId), modeFolderName(mode));
+    await electron.ensureDir(shotModeDir);
 
-    const ext = mode === "clip" ? fileExtension(input) : imageExtension(input);
-    if (mode === "clip") {
-      if (!ext || !isVideoExtension(ext)) {
-        console.warn("Ignoring non-video source for clip mode:", input);
-        return;
+    const accepted = paths.filter((input) => {
+      if (isWebOrDataUrl(input)) return false;
+      return true;
+    });
+    if (!accepted.length) return;
+
+    const copiedRelatives: string[] = [];
+    for (const input of accepted) {
+      const sourceExists = await electron.exists(input);
+      if (!sourceExists) {
+        continue;
       }
-    } else if (!ext) {
-      console.warn("Ignoring non-image source for image mode:", input);
-      return;
+      const ext = fileExtension(input);
+      if (!ext || !isFileAllowedForMode(input, mode)) {
+        continue;
+      }
+      const sourceName = sanitizeFileName(getBaseName(input));
+      if (!sourceName) continue;
+      const uniqueName = await uniqueFileName(shotModeDir, sourceName);
+      const target = joinPath(shotModeDir, uniqueName);
+      await electron.copyFile(input, target);
+      copiedRelatives.push(`shots/${shotId}/${modeFolderName(mode)}/${uniqueName}`);
     }
-    const fileNameBase = mode === "concept" ? "concept" : mode === "clip" ? "clip" : "image";
-    const fileName = ext ? `${fileNameBase}${ext}` : fileNameBase;
-    const shotDir = joinPath(shotsDirForScene(sceneId), shotId);
-    await electron.ensureDir(shotDir);
-    const target = joinPath(shotDir, fileName);
-    await electron.copyFile(input, target);
-    const relative = `shots/${shotId}/${fileName}`;
+    if (!copiedRelatives.length) return;
+
+    const newestRelative = copiedRelatives[copiedRelatives.length - 1];
     const next: ShotsIndex = {
       shots: shotsIndex.shots.map((shot) => {
         if (shot.id !== shotId) return shot;
-        if (mode === "concept") return { ...shot, conceptImage: relative };
-        if (mode === "clip") return { ...shot, clipPath: relative };
-        return { ...shot, stillImage: relative, image: relative };
+        const mergedAssets = uniqueStrings([...getModeAssets(shot, mode), ...copiedRelatives]);
+        const withAssets = withModeAssets(shot, mode, mergedAssets);
+        return withFavoriteRelative(withAssets, mode, newestRelative);
       }),
     };
     await saveShotsState(next, { immediate: true });
+    if (versionsOpen && activeShotIdRef.current === shotId && displayModeRef.current === mode) {
+      const shot = next.shots.find((item) => item.id === shotId);
+      if (shot) {
+        const seq = ++assetsSeqRef.current;
+        setModeAssetsLoading(true);
+        const loaded = await listModeAssets(sceneId, shot, mode);
+        if (seq === assetsSeqRef.current) {
+          setModeAssets(loaded);
+          setModeAssetsLoading(false);
+        }
+      }
+    }
   };
 
   const browseShotMedia = async (options?: { shotId?: string; mode?: ShotDisplayMode }) => {
@@ -559,11 +739,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
   const shotAssetPath = (shot: ShotItem, mode: ShotDisplayMode = displayMode): string => {
     if (!sceneDir) return "";
-    const relative = mode === "concept"
-      ? shot.conceptImage
-      : mode === "clip"
-        ? shot.clipPath
-        : shot.stillImage || shot.image;
+    const relative = getFavoriteRelative(shot, mode);
     if (!relative) return "";
     return joinPath(sceneDir, relative);
   };
@@ -598,6 +774,129 @@ export function ShotsPage({ project }: ShotsPageProps) {
     await electron.revealInFileManager(menuShotAssetPath);
     closeImageMenu();
   };
+
+  const openVersionsBrowser = (shotId: string) => {
+    setActiveShotId(shotId);
+    setPreviewIndex(null);
+    setVersionsOpen(true);
+  };
+
+  const closeVersionsBrowser = () => {
+    setVersionsOpen(false);
+    setPreviewIndex(null);
+    setAssetDeleteOpen(false);
+    setAssetDeleteTarget(null);
+  };
+
+  const setFavoriteForAsset = async (asset: ShotModeAsset) => {
+    if (!activeShotId || !activeSceneId) return;
+    const next: ShotsIndex = {
+      shots: shotsIndex.shots.map((shot) => {
+        if (shot.id !== activeShotId) return shot;
+        return withFavoriteRelative(shot, displayMode, asset.relative);
+      }),
+    };
+    await saveShotsState(next, { immediate: true });
+    setModeAssets((current) => current.map((entry) => ({ ...entry, isFavorite: entry.relative === asset.relative })));
+  };
+
+  const requestDeleteAsset = (asset: ShotModeAsset) => {
+    setAssetDeleteTarget(asset);
+    setAssetDeleteOpen(true);
+  };
+
+  const confirmDeleteAsset = async () => {
+    if (!assetDeleteTarget || !activeSceneId) return;
+    const activeId = activeShotIdRef.current;
+    if (!activeId) return;
+
+    const next: ShotsIndex = {
+      shots: shotsIndex.shots.map((shot) => {
+        if (shot.id !== activeId) return shot;
+        const nextAssets = getModeAssets(shot, displayModeRef.current).filter(
+          (relative) => relative !== assetDeleteTarget.relative,
+        );
+        const withAssets = withModeAssets(shot, displayModeRef.current, nextAssets);
+        const currentFavorite = getFavoriteRelative(withAssets, displayModeRef.current);
+        if (currentFavorite !== assetDeleteTarget.relative) {
+          return withAssets;
+        }
+        const fallback = nextAssets[nextAssets.length - 1] ?? "";
+        return withFavoriteRelative(withAssets, displayModeRef.current, fallback);
+      }),
+    };
+
+    const stillReferenced = next.shots.some((shot) =>
+      SHOT_MODES.some((mode) => getModeAssets(shot, mode).includes(assetDeleteTarget.relative)),
+    );
+    if (!stillReferenced) {
+      await electron.deleteFile(assetDeleteTarget.path);
+    }
+
+    await saveShotsState(next, { immediate: true });
+    const currentShot = next.shots.find((shot) => shot.id === activeId);
+    if (currentShot) {
+      const seq = ++assetsSeqRef.current;
+      setModeAssetsLoading(true);
+      const loaded = await listModeAssets(activeSceneId, currentShot, displayModeRef.current);
+      if (seq === assetsSeqRef.current) {
+        setModeAssets(loaded);
+        setModeAssetsLoading(false);
+      }
+      if (!loaded.length) {
+        setPreviewIndex(null);
+      } else if (previewIndex !== null) {
+        setPreviewIndex((prev) => {
+          if (prev === null) return null;
+          return Math.min(prev, loaded.length - 1);
+        });
+      }
+    }
+    setAssetDeleteOpen(false);
+    setAssetDeleteTarget(null);
+  };
+
+  useEffect(() => {
+    if (!versionsOpen || !activeSceneId || !activeShot) {
+      setModeAssets([]);
+      setModeAssetsLoading(false);
+      return;
+    }
+    const seq = ++assetsSeqRef.current;
+    setModeAssetsLoading(true);
+    setPreviewIndex(null);
+    void (async () => {
+      const loaded = await listModeAssets(activeSceneId, activeShot, displayMode);
+      if (seq !== assetsSeqRef.current) return;
+      setModeAssets(loaded);
+      setModeAssetsLoading(false);
+    })();
+  }, [versionsOpen, activeSceneId, activeShot?.id, displayMode, shotsIndex.shots]);
+
+  useEffect(() => {
+    if (!previewAsset) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPreviewIndex(null);
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        setPreviewIndex((prev) => {
+          if (prev === null) return prev;
+          return (prev + 1) % modeAssets.length;
+        });
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        setPreviewIndex((prev) => {
+          if (prev === null) return prev;
+          return (prev - 1 + modeAssets.length) % modeAssets.length;
+        });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previewAsset, modeAssets.length]);
 
   return (
     <div className="page project-page project-page--with-sidebar">
@@ -713,35 +1012,46 @@ export function ShotsPage({ project }: ShotsPageProps) {
                         <div className="shots-inline-editor">
                           <div className="shot-editor">
                             <div className="shot-editor__image">
-                              {assetAbsolute ? (
-                                <div
-                                  className="shot-editor__image-preview"
-                                  onContextMenu={(event) => openImageMenu(event, shot.id)}
-                                  onDragOver={handleDragOver}
-                                  onDrop={async (event) => {
-                                    const paths = await extractPathsFromDrop(event);
-                                    if (!paths.length) return;
-                                    setActiveShotId(shot.id);
-                                    await updateShotMedia(paths, { shotId: shot.id });
-                                  }}
+                              <div className="shot-editor__media-shell">
+                                {assetAbsolute ? (
+                                  <div
+                                    className="shot-editor__image-preview"
+                                    onContextMenu={(event) => openImageMenu(event, shot.id)}
+                                    onDragOver={handleDragOver}
+                                    onDrop={async (event) => {
+                                      const paths = await extractPathsFromDrop(event);
+                                      if (!paths.length) return;
+                                      setActiveShotId(shot.id);
+                                      await updateShotMedia(paths, { shotId: shot.id });
+                                    }}
+                                  >
+                                    {displayMode === "clip" ? (
+                                      <video src={toFileUrl(assetAbsolute)} controls preload="metadata" />
+                                    ) : (
+                                      <img src={toFileUrl(assetAbsolute)} alt="Shot" />
+                                    )}
+                                  </div>
+                                ) : (
+                                  <DropOrBrowse
+                                    label={displayMode === "clip" ? "Drop clip here or click to browse" : "Drop image here or click to browse"}
+                                    className="moodboard-dropzone"
+                                    onPathsSelected={(paths) => void updateShotMedia(paths, { shotId: shot.id })}
+                                    browse={async () => {
+                                      await browseShotMedia({ shotId: shot.id });
+                                      return null;
+                                    }}
+                                  />
+                                )}
+                                <button
+                                  type="button"
+                                  className="shot-editor__versions-button"
+                                  title={`Browse ${displayMode} versions`}
+                                  onClick={() => openVersionsBrowser(shot.id)}
                                 >
-                                  {displayMode === "clip" ? (
-                                    <video src={toFileUrl(assetAbsolute)} controls preload="metadata" />
-                                  ) : (
-                                    <img src={toFileUrl(assetAbsolute)} alt="Shot" />
-                                  )}
-                                </div>
-                              ) : (
-                                <DropOrBrowse
-                                  label={displayMode === "clip" ? "Drop clip here or click to browse" : "Drop image here or click to browse"}
-                                  className="moodboard-dropzone"
-                                  onPathsSelected={(paths) => void updateShotMedia(paths, { shotId: shot.id })}
-                                  browse={async () => {
-                                    await browseShotMedia({ shotId: shot.id });
-                                    return null;
-                                  }}
-                                />
-                              )}
+                                  {VersionsIcon}
+                                  <span className="sr-only">Browse versions</span>
+                                </button>
+                              </div>
                             </div>
 
                             <div className="shot-editor__properties">
@@ -844,6 +1154,89 @@ export function ShotsPage({ project }: ShotsPageProps) {
         cancelLabel="Cancel"
       />
 
+      {versionsOpen ? (
+        <div className="modal-backdrop" onClick={closeVersionsBrowser}>
+          <div className="modal shot-versions-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal__header">
+              <h3 className="modal__title">
+                {capitalizeMode(displayMode)} Versions
+              </h3>
+              <button type="button" className="pill-button" onClick={closeVersionsBrowser}>
+                Close
+              </button>
+            </div>
+            {modeAssetsLoading ? <p className="muted">Loading versions...</p> : null}
+            {!modeAssetsLoading && !modeAssets.length ? <p className="muted">No versions yet in this mode.</p> : null}
+            {!modeAssetsLoading && modeAssets.length ? (
+              <div className="moodboard-grid shot-versions-grid">
+                {modeAssets.map((asset, idx) => (
+                  <button
+                    key={asset.path}
+                    type="button"
+                    className={`moodboard-tile${asset.isFavorite ? " moodboard-tile--favorite" : ""}`}
+                    onClick={() => setPreviewIndex(idx)}
+                  >
+                    <div className="moodboard-tile__img">
+                      {displayMode === "clip" ? (
+                        <video src={toFileUrl(asset.path)} muted playsInline preload="metadata" />
+                      ) : (
+                        <img src={toFileUrl(asset.path)} alt="" />
+                      )}
+                    </div>
+                    <div className="moodboard-tile__label">{asset.name}</div>
+                    <div className="shot-versions-grid__actions" onClick={(event) => event.stopPropagation()}>
+                      <button
+                        type="button"
+                        className="pill-button"
+                        disabled={asset.isFavorite}
+                        onClick={() => void setFavoriteForAsset(asset)}
+                      >
+                        {asset.isFavorite ? "Favorite" : "Set Favorite"}
+                      </button>
+                      <button
+                        type="button"
+                        className="pill-button"
+                        onClick={() => requestDeleteAsset(asset)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {previewAsset ? (
+        <div className="moodboard-preview" onClick={() => setPreviewIndex(null)}>
+          <div className="moodboard-preview__inner" onClick={(event) => event.stopPropagation()}>
+            {displayMode === "clip" ? (
+              <video src={toFileUrl(previewAsset.path)} controls autoPlay preload="metadata" />
+            ) : (
+              <img src={toFileUrl(previewAsset.path)} alt="" />
+            )}
+            <div className="moodboard-preview__name">
+              {previewAsset.name}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <ConfirmDialog
+        open={assetDeleteOpen}
+        title="Delete Version"
+        message="Delete this version file?"
+        onCancel={() => {
+          setAssetDeleteOpen(false);
+          setAssetDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDeleteAsset()}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+      />
+
       {imageMenuPos && menuShot && menuShotAssetPath ? (
         <div className="context-menu-backdrop" onClick={closeImageMenu}>
           <div
@@ -874,28 +1267,26 @@ export function ShotsPage({ project }: ShotsPageProps) {
   );
 }
 
-function imageExtension(path: string): string | null {
-  const lower = path.toLowerCase();
-  if (lower.endsWith(".png")) return ".png";
-  if (lower.endsWith(".jpg")) return ".jpg";
-  if (lower.endsWith(".jpeg")) return ".jpeg";
-  if (lower.endsWith(".webp")) return ".webp";
-  return null;
-}
-
 function normalizeShotsIndex(index: ShotsIndex): ShotsIndex {
   return {
     shots: (index.shots ?? [])
       .map((shot, idx) => {
-        const stillImage = shot.stillImage ?? shot.image ?? "";
+        const conceptAssets = normalizeAssetList(shot.conceptAssets);
+        const stillAssets = normalizeAssetList(shot.stillAssets);
+        const clipAssets = normalizeAssetList(shot.clipAssets);
+        const favoriteConcept = typeof shot.favoriteConcept === "string" ? shot.favoriteConcept : "";
+        const favoriteStill = typeof shot.favoriteStill === "string" ? shot.favoriteStill : "";
+        const favoriteClip = typeof shot.favoriteClip === "string" ? shot.favoriteClip : "";
         return {
           id: shot.id,
           order: typeof shot.order === "number" ? shot.order : idx,
           description: shot.description ?? "",
-          image: stillImage,
-          conceptImage: shot.conceptImage ?? "",
-          stillImage,
-          clipPath: shot.clipPath ?? "",
+          favoriteConcept: conceptAssets.includes(favoriteConcept) ? favoriteConcept : (conceptAssets[conceptAssets.length - 1] ?? ""),
+          favoriteStill: stillAssets.includes(favoriteStill) ? favoriteStill : (stillAssets[stillAssets.length - 1] ?? ""),
+          favoriteClip: clipAssets.includes(favoriteClip) ? favoriteClip : (clipAssets[clipAssets.length - 1] ?? ""),
+          conceptAssets,
+          stillAssets,
+          clipAssets,
           durationSeconds: typeof shot.durationSeconds === "number" && Number.isFinite(shot.durationSeconds)
             ? shot.durationSeconds
             : 2,
@@ -941,3 +1332,69 @@ function isVideoExtension(ext: string): boolean {
   const normalized = ext.toLowerCase().replace(/^\./, "");
   return VIDEO_EXTENSIONS.includes(normalized as typeof VIDEO_EXTENSIONS[number]);
 }
+
+function imageExtensionFromName(value: string): string | null {
+  const ext = fileExtension(value);
+  if (!ext) return null;
+  if (ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp") return ext;
+  return null;
+}
+
+function isFileAllowedForMode(value: string, mode: ShotDisplayMode): boolean {
+  const ext = fileExtension(value);
+  if (!ext) return false;
+  if (mode === "clip") return isVideoExtension(ext);
+  return imageExtensionFromName(value) !== null;
+}
+
+function modeFolderName(mode: ShotDisplayMode): "concept" | "still" | "clip" {
+  return mode;
+}
+
+function capitalizeMode(mode: ShotDisplayMode): string {
+  return mode.charAt(0).toUpperCase() + mode.slice(1);
+}
+
+function getBaseName(pathValue: string): string {
+  const normalized = pathValue.replace(/\\/g, "/");
+  const idx = normalized.lastIndexOf("/");
+  return idx === -1 ? normalized : normalized.slice(idx + 1);
+}
+
+function sanitizeFileName(value: string): string {
+  return value.replace(/[\\/:*?"<>|]+/g, "").trim();
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const value = raw.trim().replace(/\\/g, "/");
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+function normalizeAssetList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return uniqueStrings(value.filter((entry): entry is string => typeof entry === "string"));
+}
+
+async function uniqueFileName(dir: string, fileName: string): Promise<string> {
+  const safe = sanitizeFileName(fileName);
+  if (!safe) return `asset-${Date.now()}`;
+  const extIdx = safe.lastIndexOf(".");
+  const base = extIdx > 0 ? safe.slice(0, extIdx) : safe;
+  const ext = extIdx > 0 ? safe.slice(extIdx) : "";
+  let candidate = safe;
+  let counter = 1;
+  while (await window.electronAPI.exists(joinPath(dir, candidate))) {
+    candidate = `${base}-${counter}${ext}`;
+    counter += 1;
+  }
+  return candidate;
+}
+
+const SHOT_MODES: ShotDisplayMode[] = ["concept", "still", "clip"];
