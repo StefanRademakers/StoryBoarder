@@ -384,6 +384,17 @@ button { font-family: inherit; cursor: pointer; }
   padding: 0;
 }
 
+/* Keep Enter/new-paragraph breaks visible without creating large gaps. */
+.script-editor__rich :where(p, div, h1, h2, h3, ul, ol) + :where(p, div, h1, h2, h3, ul, ol) {
+  margin-top: 0.18em;
+}
+
+/* Keep intentional empty paragraphs visible too. */
+.script-editor__rich p:empty,
+.script-editor__rich p:has(> br:only-child) {
+  min-height: 1.35em;
+}
+
 .script-editor__rich input[type="checkbox"] {
   accent-color: #222222;
   border: 1px solid #111111;
@@ -422,6 +433,12 @@ button { font-family: inherit; cursor: pointer; }
 
 .script-editor__rich :where(li) {
   margin-left: 8px;
+}
+
+.script-editor__rich hr {
+  border: 0;
+  border-top: 1px solid transparent;
+  margin: 1.2em 0;
 }
 
 .notes-panel {

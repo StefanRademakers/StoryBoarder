@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef } from "react";
 import {
   MDXEditor,
   type MDXEditorMethods,
@@ -15,6 +15,9 @@ import {
   ListsToggle,
   UndoRedo,
   CreateLink,
+  InsertThematicBreak,
+  Separator,
+  thematicBreakPlugin,
 } from "@mdxeditor/editor";
 import { debounce } from "../../utils/debounce";
 import { electron } from "../../services/electron";
@@ -44,26 +47,8 @@ export function MdxTextSection({
   className,
 }: MdxTextSectionProps) {
   const editorRef = useRef<MDXEditorMethods | null>(null);
-  const lastValueRef = useRef(value ?? "");
-  const lastPersistedMarkdownRef = useRef(normalizeMarkdownForLoad(value ?? ""));
-
-  const persistToDisk = useCallback(async (markdown: string) => {
-    if (targetPath) {
-      await electron.writeText(targetPath, markdown);
-      return;
-    }
-    const scriptDir = joinPath(projectRoot, "script");
-    const scriptPath = joinPath(scriptDir, fileName);
-    await electron.ensureDir(scriptDir);
-    await electron.writeText(scriptPath, markdown);
-  }, [projectRoot, fileName, targetPath]);
-
-  const resolveMarkdownDir = useCallback((): string => {
-    if (targetPath) {
-      return getDirectoryName(targetPath);
-    }
-    return joinPath(projectRoot, "script");
-  }, [projectRoot, targetPath]);
+  const lastEditableRef = useRef(value ?? "");
+  const lastPersistedMarkdownRef = useRef(value ?? "");
 
   const resolveMarkdownFilePath = useCallback((): string => {
     if (targetPath) {
@@ -71,6 +56,20 @@ export function MdxTextSection({
     }
     return joinPath(joinPath(projectRoot, "script"), fileName);
   }, [projectRoot, fileName, targetPath]);
+
+  const persistToDisk = useCallback(async (markdown: string) => {
+    const scriptPath = resolveMarkdownFilePath();
+    const scriptDir = getDirectoryName(scriptPath);
+    await electron.ensureDir(scriptDir);
+    await electron.writeText(scriptPath, markdown);
+  }, [resolveMarkdownFilePath]);
+
+  const resolveMarkdownDir = useCallback((): string => {
+    if (targetPath) {
+      return getDirectoryName(targetPath);
+    }
+    return joinPath(projectRoot, "script");
+  }, [projectRoot, targetPath]);
 
   const cleanupRemovedLocalImages = useCallback(async (previousMarkdown: string, nextMarkdown: string) => {
     const previousSources = new Set(extractImageSources(previousMarkdown).map(normalizeImageSource));
@@ -153,40 +152,59 @@ export function MdxTextSection({
     }, debounceMs)
   );
 
-  useEffect(() => () => debouncedPersistRef.current.cancel(), []);
-
   useEffect(() => {
     const next = value ?? "";
-    const loaded = normalizeMarkdownForLoad(next);
-    if (loaded === lastValueRef.current) {
+    if (next === lastEditableRef.current) {
       return;
     }
-    lastValueRef.current = loaded;
-    lastPersistedMarkdownRef.current = loaded;
-    editorRef.current?.setMarkdown(loaded);
+    lastEditableRef.current = next;
+    lastPersistedMarkdownRef.current = next;
+    editorRef.current?.setMarkdown(next);
   }, [value]);
 
-  const handleChange = useCallback((markdown: string) => {
-    const normalized = normalizeMarkdownForSave(markdown);
-    lastValueRef.current = normalized;
-    onChange(normalized);
-    debouncedPersistRef.current(normalized);
+  const handleChange = useCallback((markdown: string, initialMarkdownNormalize?: boolean) => {
+    if (initialMarkdownNormalize) {
+      return;
+    }
+    lastEditableRef.current = markdown;
+    onChange(markdown);
+    debouncedPersistRef.current(markdown);
   }, [onChange]);
 
   const handleBlurCapture = () => {
-    const raw = editorRef.current?.getMarkdown() ?? lastValueRef.current;
-    const markdown = normalizeMarkdownForSave(raw);
+    const raw = lastEditableRef.current;
     debouncedPersistRef.current.cancel();
-    onChange(markdown);
-    void persistMarkdown(markdown);
+    onChange(raw);
+    void persistMarkdown(raw);
   };
 
+  const handleKeyDownCapture = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!event.shiftKey || event.key !== "Enter") {
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    const inEditor = target?.closest(".mdxeditor-root-contenteditable, .mdxeditor-contenteditable");
+    if (!inEditor) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    editorRef.current?.insertMarkdown("\n\n---\n\n");
+  }, []);
+
+  useEffect(() => () => {
+    debouncedPersistRef.current.cancel();
+    const latest = lastEditableRef.current;
+    void persistMarkdown(latest);
+  }, [persistMarkdown]);
+
   const content = (
-    <div className={className} onBlurCapture={handleBlurCapture}>
+    <div className={className} onBlurCapture={handleBlurCapture} onKeyDownCapture={handleKeyDownCapture}>
       <MDXEditor
         ref={editorRef}
         markdown={value ?? ""}
         onChange={handleChange}
+        trim={false}
         className="script-editor__mdx"
         contentEditableClassName="script-editor__rich"
         placeholder={placeholder ?? "Paste or type your script here..."}
@@ -201,15 +219,19 @@ export function MdxTextSection({
             imageUploadHandler: handleImageUpload,
             imagePreviewHandler: resolveImagePreviewSource,
           }),
+          thematicBreakPlugin(),
           markdownShortcutPlugin(),
           toolbarPlugin({
             toolbarContents: () => (
               <>
                 <UndoRedo />
+                <Separator />
                 <BlockTypeSelect />
                 <BoldItalicUnderlineToggles />
                 <ListsToggle />
                 <CreateLink />
+                <Separator />
+                <InsertThematicBreak />
               </>
             ),
           }),
@@ -311,13 +333,4 @@ function sanitizeBaseName(value: string): string {
   const raw = dotIdx > 0 ? value.slice(0, dotIdx) : value;
   const cleaned = raw.replace(/[\\/:*?"<>|]+/g, "").trim();
   return cleaned || `image-${Date.now()}`;
-}
-
-function normalizeMarkdownForSave(markdown: string): string {
-  // Preserve intentional blank lines by inserting invisible HTML comments.
-  return markdown.replace(/\n\s*\n/g, "\n\n<!-- -->\n\n");
-}
-
-function normalizeMarkdownForLoad(markdown: string): string {
-  return markdown.replace(/\n\s*<!--\s*-->\s*\n/g, "\n\n");
 }
