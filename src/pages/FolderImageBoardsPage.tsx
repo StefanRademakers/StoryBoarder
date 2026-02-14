@@ -5,6 +5,10 @@ import { electron } from "../services/electron";
 import { DropOrBrowse } from "../components/common/DropOrBrowse";
 import { ConfirmDialog } from "../components/common/ConfirmDialog";
 import { useAppState } from "../state/appState";
+import { MediaContextMenu } from "../components/common/MediaContextMenu";
+import { MediaLightbox } from "../components/common/MediaLightbox";
+import { MediaTileGrid } from "../components/common/MediaTileGrid";
+import { inferMediaKind, type MediaItem } from "../components/common/mediaTypes";
 
 interface FolderImageBoardsPageProps {
   project: ProjectState;
@@ -74,6 +78,10 @@ export function FolderImageBoardsPage({
   }, [rootDir]);
 
   const activeItem = useMemo(() => items.find((i) => i.path === active) ?? null, [items, active]);
+  const mediaItems = useMemo<Array<MediaItem & BoardMedia>>(
+    () => images.map((item) => ({ ...item, id: item.path, kind: inferMediaKind(item.path) })),
+    [images],
+  );
 
   const loadImages = async (dir: string) => {
     const entries = await electron.listDir(dir);
@@ -234,7 +242,7 @@ export function FolderImageBoardsPage({
   };
 
   const currentImage = previewIndex === null ? null : images[previewIndex] ?? null;
-  const currentIsVideo = currentImage ? isVideoFile(currentImage.path) : false;
+  const currentIsVideo = currentImage ? inferMediaKind(currentImage.path) === "video" : false;
 
   useEffect(() => {
     if (!currentImage) {
@@ -276,16 +284,6 @@ export function FolderImageBoardsPage({
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         closePreview();
-      } else if (event.key === "ArrowRight") {
-        setPreviewIndex((prev) => {
-          if (prev === null) return prev;
-          return (prev + 1) % images.length;
-        });
-      } else if (event.key === "ArrowLeft") {
-        setPreviewIndex((prev) => {
-          if (prev === null) return prev;
-          return (prev - 1 + images.length) % images.length;
-        });
       } else if (event.key === "Delete") {
         if (currentImage) {
           setConfirmTarget(currentImage);
@@ -372,26 +370,12 @@ export function FolderImageBoardsPage({
                   return picked;
                 }}
               />
-              <div className="moodboard-grid">
-                {images.map((img, idx) => (
-                  <button
-                    key={img.path}
-                    type="button"
-                    className="moodboard-tile"
-                    onClick={() => setPreviewIndex(idx)}
-                    onContextMenu={(event) => openImageMenu(event, img)}
-                  >
-                    <div className="moodboard-tile__img">
-                      {isVideoFile(img.path) ? (
-                        <video src={toFileUrl(img.path)} muted playsInline autoPlay loop preload="metadata" />
-                      ) : (
-                        <img src={toFileUrl(img.path)} alt="" />
-                      )}
-                    </div>
-                    <div className="moodboard-tile__label">{img.name}</div>
-                  </button>
-                ))}
-              </div>
+              <MediaTileGrid
+                items={mediaItems}
+                getKey={(item) => item.path}
+                onOpen={(_item, idx) => setPreviewIndex(idx)}
+                onContextMenu={(event, item) => openImageMenu(event, item)}
+              />
             </>
           )}
         </section>
@@ -474,25 +458,32 @@ export function FolderImageBoardsPage({
         </div>
       ) : null}
 
-      {previewIndex !== null && currentImage ? (
-        <div className="moodboard-preview" onClick={closePreview}>
-          <div
-            className="moodboard-preview__inner"
-            onClick={(e) => e.stopPropagation()}
-            onContextMenu={(event) => openImageMenu(event, currentImage)}
-          >
-            {currentIsVideo ? (
-              <video src={toFileUrl(currentImage.path)} controls autoPlay playsInline />
-            ) : (
-              <img src={toFileUrl(currentImage.path)} alt="" />
-            )}
-            <div className="moodboard-preview__name">
-              {currentImage.name}
-              {previewSize ? ` (${previewSize.width}x${previewSize.height})` : ""}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <MediaLightbox
+        open={previewIndex !== null && Boolean(currentImage)}
+        path={currentImage?.path ?? null}
+        isVideo={currentIsVideo}
+        name={currentImage?.name}
+        meta={previewSize ? `(${previewSize.width}x${previewSize.height})` : undefined}
+        onClose={closePreview}
+        onNext={() => {
+          if (!images.length) return;
+          setPreviewIndex((prev) => {
+            if (prev === null) return prev;
+            return (prev + 1) % images.length;
+          });
+        }}
+        onPrev={() => {
+          if (!images.length) return;
+          setPreviewIndex((prev) => {
+            if (prev === null) return prev;
+            return (prev - 1 + images.length) % images.length;
+          });
+        }}
+        onContextMenu={(event) => {
+          if (!currentImage) return;
+          openImageMenu(event, currentImage);
+        }}
+      />
 
       {menuPos && menuItem ? (
         <div className="context-menu-backdrop" onClick={closeMenu}>
@@ -511,29 +502,40 @@ export function FolderImageBoardsPage({
         </div>
       ) : null}
 
-      {imageMenuPos && imageMenuItem ? (
-        <div className="context-menu-backdrop" onClick={closeImageMenu}>
-          <div
-            className="context-menu"
-            style={{ top: imageMenuPos.y, left: imageMenuPos.x }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {!isVideoFile(imageMenuItem.path) ? (
-              <button type="button" className="context-menu__item" onClick={() => void openImageInPhotoshop(imageMenuItem)}>
-                Open in Photoshop
-              </button>
-            ) : null}
-            {!isVideoFile(imageMenuItem.path) ? (
-              <button type="button" className="context-menu__item" onClick={() => void copyImageToClipboard(imageMenuItem)}>
-                Copy to Clipboard
-              </button>
-            ) : null}
-            <button type="button" className="context-menu__item" onClick={() => void revealImageInExplorer(imageMenuItem)}>
-              {revealLabel}
-            </button>
-          </div>
-        </div>
-      ) : null}
+      <MediaContextMenu
+        open={Boolean(imageMenuPos && imageMenuItem)}
+        position={imageMenuPos}
+        onClose={closeImageMenu}
+        actions={[
+          {
+            key: "open-ps",
+            label: "Open in Photoshop",
+            visible: Boolean(imageMenuItem && !isVideoFile(imageMenuItem.path)),
+            onSelect: async () => {
+              if (!imageMenuItem) return;
+              await openImageInPhotoshop(imageMenuItem);
+            },
+          },
+          {
+            key: "copy",
+            label: "Copy to Clipboard",
+            visible: Boolean(imageMenuItem && !isVideoFile(imageMenuItem.path)),
+            onSelect: async () => {
+              if (!imageMenuItem) return;
+              await copyImageToClipboard(imageMenuItem);
+            },
+          },
+          {
+            key: "reveal",
+            label: revealLabel,
+            visible: Boolean(imageMenuItem),
+            onSelect: async () => {
+              if (!imageMenuItem) return;
+              await revealImageInExplorer(imageMenuItem);
+            },
+          },
+        ]}
+      />
 
       <ConfirmDialog
         open={confirmOpen}

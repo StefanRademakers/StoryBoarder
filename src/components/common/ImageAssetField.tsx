@@ -2,6 +2,7 @@ import { useState, type MouseEvent } from "react";
 import { electron } from "../../services/electron";
 import { extractPathsFromDrop, handleDragOver } from "../../utils/dnd";
 import { toFileUrl } from "../../utils/path";
+import { MediaContextMenu } from "./MediaContextMenu";
 
 interface ImageAssetFieldProps {
   imagePath?: string | null;
@@ -139,28 +140,45 @@ export function ImageAssetField({
         </div>
       )}
 
-      {menuPos && imagePath ? (
-        <div className="context-menu-backdrop" onClick={closeMenu}>
-          <div
-            className="context-menu"
-            style={{ top: menuPos.y, left: menuPos.x }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button type="button" className="context-menu__item" onClick={() => void replaceImage()}>
-              Replace image
-            </button>
-            <button type="button" className="context-menu__item" onClick={() => void openInPhotoshop()}>
-              Open in Photoshop
-            </button>
-            <button type="button" className="context-menu__item" onClick={() => void copyToClipboard()}>
-              Copy to Clipboard
-            </button>
-            <button type="button" className="context-menu__item" onClick={() => void revealInExplorer()}>
-              {revealLabel}
-            </button>
-          </div>
-        </div>
-      ) : null}
+      <MediaContextMenu
+        open={Boolean(menuPos && imagePath)}
+        position={menuPos}
+        onClose={closeMenu}
+        actions={[
+          {
+            key: "replace",
+            label: "Replace image",
+            visible: Boolean(imagePath),
+            onSelect: async () => {
+              await replaceImage();
+            },
+          },
+          {
+            key: "open-ps",
+            label: "Open in Photoshop",
+            visible: Boolean(imagePath),
+            onSelect: async () => {
+              await openInPhotoshop();
+            },
+          },
+          {
+            key: "copy",
+            label: "Copy to Clipboard",
+            visible: Boolean(imagePath),
+            onSelect: async () => {
+              await copyToClipboard();
+            },
+          },
+          {
+            key: "reveal",
+            label: revealLabel,
+            visible: Boolean(imagePath),
+            onSelect: async () => {
+              await revealInExplorer();
+            },
+          },
+        ]}
+      />
     </div>
   );
 }

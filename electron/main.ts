@@ -11,7 +11,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { PythonResponse } from "../shared/ipc";
-import type { AppPathKind, PickDirOptions, PickFileOptions } from "../shared/preload";
+import type { AppPathKind, PickDirOptions, PickFileOptions, PickSaveFileOptions } from "../shared/preload";
 import { PythonService } from "./pythonService";
 
 const fsPromises = fs.promises;
@@ -398,6 +398,22 @@ ipcMain.handle("dialog:pick-dir", async (event, options: PickDirOptions = {}) =>
     return null;
   }
   return result.filePaths[0];
+});
+
+ipcMain.handle("dialog:save-file", async (event, options: PickSaveFileOptions = {}) => {
+  const browserWindow = BrowserWindow.fromWebContents(event.sender);
+  const dialogOptions: Electron.SaveDialogOptions = {
+    title: options.title,
+    defaultPath: options.defaultPath,
+    filters: options.filters,
+  };
+  const result = browserWindow
+    ? await dialog.showSaveDialog(browserWindow, dialogOptions)
+    : await dialog.showSaveDialog(dialogOptions);
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+  return result.filePath;
 });
 
 function normalizePath(value: string): string {

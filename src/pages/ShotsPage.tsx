@@ -6,6 +6,10 @@ import { DropOrBrowse } from "../components/common/DropOrBrowse";
 import { ConfirmDialog } from "../components/common/ConfirmDialog";
 import { extractPathsFromDrop, handleDragOver } from "../utils/dnd";
 import { useAppState } from "../state/appState";
+import { MediaContextMenu } from "../components/common/MediaContextMenu";
+import { MediaLightbox } from "../components/common/MediaLightbox";
+import { MediaTileGrid } from "../components/common/MediaTileGrid";
+import { inferMediaKind, type MediaItem } from "../components/common/mediaTypes";
 
 interface ShotsPageProps {
   project: ProjectState;
@@ -88,6 +92,8 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const [confirmTarget, setConfirmTarget] = useState<ShotItem | null>(null);
   const [imageMenuShotId, setImageMenuShotId] = useState<string | null>(null);
   const [imageMenuPos, setImageMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [versionMenuAsset, setVersionMenuAsset] = useState<ShotModeAsset | null>(null);
+  const [versionMenuPos, setVersionMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [displayMode, setDisplayMode] = useState<ShotDisplayMode>("still");
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [modeAssets, setModeAssets] = useState<ShotModeAsset[]>([]);
@@ -97,6 +103,10 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const [assetDeleteTarget, setAssetDeleteTarget] = useState<ShotModeAsset | null>(null);
   const [playbackOpen, setPlaybackOpen] = useState(false);
   const [playbackIndex, setPlaybackIndex] = useState(0);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportColumns, setExportColumns] = useState(2);
+  const [gridExportBusy, setGridExportBusy] = useState(false);
+  const [gridExportMessage, setGridExportMessage] = useState<string | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shotItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -123,6 +133,10 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const activeShot = useMemo(() => shots.find((s) => s.id === activeShotId) ?? null, [shots, activeShotId]);
   const playbackShot = playbackOpen ? shots[playbackIndex] ?? null : null;
   const previewAsset = previewIndex === null ? null : modeAssets[previewIndex] ?? null;
+  const versionMediaItems = useMemo<Array<MediaItem & ShotModeAsset>>(
+    () => modeAssets.map((asset) => ({ ...asset, id: asset.path, kind: inferMediaKind(asset.path) })),
+    [modeAssets],
+  );
 
   const sceneDir = activeScene ? joinPath(scenesRoot, activeScene.id) : null;
 
@@ -781,6 +795,72 @@ export function ShotsPage({ project }: ShotsPageProps) {
     });
   };
 
+  const exportSceneGrid = async () => {
+    if (!activeScene || !shots.length || gridExportBusy) return;
+    if (displayMode === "clip") {
+      setGridExportMessage("Export is only available in Concept or Still mode.");
+      return;
+    }
+    const mode: "concept" | "still" = displayMode;
+
+    const columns = Math.max(1, Math.min(24, Math.round(exportColumns) || 2));
+    const width = resolveProjectDimension(project.settings?.width, 1920);
+    const height = resolveProjectDimension(project.settings?.height, 1080);
+    const defaultName = `${mode === "concept" ? "concept_board" : "still_board"}_${activeScene.name.replace(/[\\/:*?"<>|]+/g, "_")}.png`;
+    const pickedFile = await electron.pickSaveFile({
+      title: "Save grid export",
+      defaultPath: joinPath(joinPath(scenesRoot, activeScene.id), defaultName),
+      filters: [{ name: "PNG Image", extensions: ["png"] }],
+    });
+    if (!pickedFile) return;
+    const items = shots.map((shot, idx) => {
+      const absolute = shotAssetPath(shot, mode);
+      return {
+        path: absolute,
+        label: `SHOT ${String(idx + 1).padStart(3, "0")}`,
+      };
+    });
+
+    setGridExportBusy(true);
+    setGridExportMessage(null);
+    try {
+      const expectedOutputPath = pickedFile.toLowerCase().endsWith(".png") ? pickedFile : `${pickedFile}.png`;
+      const response = await electron.runPythonCommand(
+        "create_image_grid",
+        {
+          paths: [],
+          data: {
+            items,
+            xTiles: columns,
+            tileWidth: width,
+            tileHeight: height,
+            fitMode: "contain",
+            padding: 24,
+            addLabels: true,
+            textColor: "#ffffff",
+            backgroundColor: "#ffffff",
+            outputPath: pickedFile,
+          },
+        },
+        { timeoutMs: 120000 },
+      );
+      if (!response.ok) {
+        setGridExportMessage(`Export failed: ${response.error.message}`);
+        return;
+      }
+      const message = typeof response.data?.message === "string"
+        ? response.data.message
+        : "Grid export completed.";
+      setGridExportMessage(message);
+      await electron.revealInFileManager(expectedOutputPath);
+      setExportDialogOpen(false);
+    } catch (error) {
+      setGridExportMessage(`Export failed: ${toErrorMessage(error)}`);
+    } finally {
+      setGridExportBusy(false);
+    }
+  };
+
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       if (!activeSceneIdRef.current || !activeShotIdRef.current) return;
@@ -882,11 +962,23 @@ export function ShotsPage({ project }: ShotsPageProps) {
     setImageMenuPos(null);
   };
 
+  const closeVersionMenu = () => {
+    setVersionMenuAsset(null);
+    setVersionMenuPos(null);
+  };
+
   const openImageMenu = (event: React.MouseEvent, shotId: string) => {
     event.preventDefault();
     event.stopPropagation();
     setImageMenuShotId(shotId);
     setImageMenuPos({ x: event.clientX, y: event.clientY });
+  };
+
+  const openVersionMenu = (event: React.MouseEvent, asset: ShotModeAsset) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setVersionMenuAsset(asset);
+    setVersionMenuPos({ x: event.clientX, y: event.clientY });
   };
 
   const shotAssetPath = (shot: ShotItem, mode: ShotDisplayMode = displayMode): string => {
@@ -991,6 +1083,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const closeVersionsBrowser = () => {
     setVersionsOpen(false);
     setPreviewIndex(null);
+    closeVersionMenu();
     setAssetDeleteOpen(false);
     setAssetDeleteTarget(null);
   };
@@ -1010,6 +1103,28 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const requestDeleteAsset = (asset: ShotModeAsset) => {
     setAssetDeleteTarget(asset);
     setAssetDeleteOpen(true);
+  };
+
+  const openVersionAssetInPhotoshop = async () => {
+    if (!versionMenuAsset) return;
+    if (displayMode === "clip") return;
+    const configuredPath = appSettings.photoshopPath.trim();
+    if (!configuredPath) return;
+    await electron.openWithApp(configuredPath, versionMenuAsset.path);
+    closeVersionMenu();
+  };
+
+  const copyVersionAssetToClipboard = async () => {
+    if (!versionMenuAsset) return;
+    if (displayMode === "clip") return;
+    await electron.copyImageToClipboard(versionMenuAsset.path);
+    closeVersionMenu();
+  };
+
+  const revealVersionAssetInExplorer = async () => {
+    if (!versionMenuAsset) return;
+    await electron.revealInFileManager(versionMenuAsset.path);
+    closeVersionMenu();
   };
 
   const confirmDeleteAsset = async () => {
@@ -1080,31 +1195,6 @@ export function ShotsPage({ project }: ShotsPageProps) {
     })();
   }, [versionsOpen, activeSceneId, activeShot?.id, displayMode, shotsIndex.shots]);
 
-  useEffect(() => {
-    if (!previewAsset) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setPreviewIndex(null);
-        return;
-      }
-      if (event.key === "ArrowRight") {
-        setPreviewIndex((prev) => {
-          if (prev === null) return prev;
-          return (prev + 1) % modeAssets.length;
-        });
-        return;
-      }
-      if (event.key === "ArrowLeft") {
-        setPreviewIndex((prev) => {
-          if (prev === null) return prev;
-          return (prev - 1 + modeAssets.length) % modeAssets.length;
-        });
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [previewAsset, modeAssets.length]);
-
   return (
     <div className="page project-page project-page--with-sidebar">
       <div className="sidebar-nav moodboards-sidebar">
@@ -1143,6 +1233,14 @@ export function ShotsPage({ project }: ShotsPageProps) {
                 <div className="shots-toolbar__actions">
                   <button type="button" className="pill-button" onClick={() => void createShot({ afterSelected: true })}>New shot</button>
                   <button type="button" className="pill-button" onClick={openPlayback} disabled={!shots.length}>Play</button>
+                  <button
+                    type="button"
+                    className="pill-button"
+                    disabled={!shots.length || gridExportBusy}
+                    onClick={() => setExportDialogOpen(true)}
+                  >
+                    Export
+                  </button>
                 </div>
                 <div className="shots-toolbar__modes">
                   <button
@@ -1171,6 +1269,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
                   </button>
                 </div>
               </div>
+              {gridExportMessage ? <p className="muted">{gridExportMessage}</p> : null}
             </section>
 
             <section className="panel">
@@ -1378,69 +1477,118 @@ export function ShotsPage({ project }: ShotsPageProps) {
             {modeAssetsLoading ? <p className="muted">Loading versions...</p> : null}
             {!modeAssetsLoading && !modeAssets.length ? <p className="muted">No versions yet in this mode.</p> : null}
             {!modeAssetsLoading && modeAssets.length ? (
-              <div className="moodboard-grid shot-versions-grid">
-                {modeAssets.map((asset, idx) => (
-                  <button
-                    key={asset.path}
-                    type="button"
-                    className={`moodboard-tile${asset.isFavorite ? " moodboard-tile--favorite" : ""}`}
-                    onClick={() => setPreviewIndex(idx)}
-                  >
-                    <div className="moodboard-tile__img">
-                      {displayMode === "clip" ? (
-                        <video src={toFileUrl(asset.path)} muted playsInline preload="metadata" />
-                      ) : (
-                        <img src={toFileUrl(asset.path)} alt="" />
-                      )}
-                    </div>
-                    <div className="moodboard-tile__label">{asset.name}</div>
-                    <div className="shot-versions-grid__actions" onClick={(event) => event.stopPropagation()}>
-                      <button
-                        type="button"
-                        className={`shot-versions-grid__icon-button${asset.isFavorite ? " shot-versions-grid__icon-button--active" : ""}`}
-                        disabled={asset.isFavorite}
-                        onClick={() => void setFavoriteForAsset(asset)}
-                        aria-label={asset.isFavorite ? "Favorite (active)" : "Set favorite"}
-                        title={asset.isFavorite ? "Favorite" : "Set favorite"}
-                      >
-                        <img
-                          src={asset.isFavorite ? "icons/favorite_active.png" : "icons/favorite_not_active.png"}
-                          alt=""
-                          aria-hidden
-                        />
-                      </button>
-                      <button
-                        type="button"
-                        className="shot-versions-grid__icon-button"
-                        onClick={() => requestDeleteAsset(asset)}
-                        aria-label="Delete version"
-                        title="Delete version"
-                      >
-                        <img src="icons/delete.png" alt="" aria-hidden />
-                      </button>
-                    </div>
-                  </button>
-                ))}
-              </div>
+              <MediaTileGrid
+                items={versionMediaItems}
+                className="moodboard-grid shot-versions-grid"
+                getKey={(item) => item.path}
+                getTileClassName={(item) => `moodboard-tile${item.isFavorite ? " moodboard-tile--favorite" : ""}`}
+                onOpen={(_item, idx) => setPreviewIndex(idx)}
+                onContextMenu={(event, item) => openVersionMenu(event, item)}
+                renderActions={(asset) => (
+                  <div className="shot-versions-grid__actions" onClick={(event) => event.stopPropagation()}>
+                    <button
+                      type="button"
+                      className={`shot-versions-grid__icon-button${asset.isFavorite ? " shot-versions-grid__icon-button--active" : ""}`}
+                      disabled={asset.isFavorite}
+                      onClick={() => void setFavoriteForAsset(asset)}
+                      aria-label={asset.isFavorite ? "Favorite (active)" : "Set favorite"}
+                      title={asset.isFavorite ? "Favorite" : "Set favorite"}
+                    >
+                      <img
+                        src={asset.isFavorite ? "icons/favorite_active.png" : "icons/favorite_not_active.png"}
+                        alt=""
+                        aria-hidden
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      className="shot-versions-grid__icon-button"
+                      onClick={() => requestDeleteAsset(asset)}
+                      aria-label="Delete version"
+                      title="Delete version"
+                    >
+                      <img src="icons/delete.png" alt="" aria-hidden />
+                    </button>
+                  </div>
+                )}
+              />
             ) : null}
           </div>
         </div>
       ) : null}
 
-      {previewAsset ? (
-        <div className="moodboard-preview" onClick={() => setPreviewIndex(null)}>
-          <div className="moodboard-preview__inner" onClick={(event) => event.stopPropagation()}>
-            {displayMode === "clip" ? (
-              <video src={toFileUrl(previewAsset.path)} controls autoPlay preload="metadata" />
-            ) : (
-              <img src={toFileUrl(previewAsset.path)} alt="" />
-            )}
-            <div className="moodboard-preview__name">
-              {previewAsset.name}
+      {exportDialogOpen ? (
+        <div className="modal-backdrop" onClick={() => setExportDialogOpen(false)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal__header">
+              <h3 className="modal__title">Export Grid</h3>
+            </div>
+            <div className="form-section">
+              <p className="muted">
+                Mode: <strong>{displayMode === "concept" ? "Concept" : displayMode === "still" ? "Still" : "Clip (not supported)"}</strong>
+              </p>
+              <label className="form-row">
+                <span className="section-title">Columns (X)</span>
+                <input
+                  className="form-input"
+                  type="number"
+                  min={1}
+                  max={24}
+                  value={exportColumns}
+                  onChange={(event) => {
+                    const next = Number.parseInt(event.target.value, 10);
+                    setExportColumns(Number.isFinite(next) ? next : 2);
+                  }}
+                />
+              </label>
+              <p className="muted">
+                Tile size: {resolveProjectDimension(project.settings?.width, 1920)} x {resolveProjectDimension(project.settings?.height, 1080)}
+              </p>
+            </div>
+            <div className="modal__footer">
+              <button type="button" className="pill-button" onClick={() => setExportDialogOpen(false)} disabled={gridExportBusy}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="pill-button"
+                disabled={gridExportBusy}
+                onClick={() => {
+                  void exportSceneGrid();
+                }}
+              >
+                {gridExportBusy ? "Exporting..." : "Export"}
+              </button>
             </div>
           </div>
         </div>
       ) : null}
+
+      <MediaLightbox
+        open={Boolean(previewAsset)}
+        path={previewAsset?.path ?? null}
+        isVideo={previewAsset ? inferMediaKind(previewAsset.path) === "video" : false}
+        name={previewAsset?.name}
+        onClose={() => setPreviewIndex(null)}
+        onNext={() => {
+          if (!modeAssets.length) return;
+          setPreviewIndex((prev) => {
+            if (prev === null) return prev;
+            return (prev + 1) % modeAssets.length;
+          });
+        }}
+        onPrev={() => {
+          if (!modeAssets.length) return;
+          setPreviewIndex((prev) => {
+            if (prev === null) return prev;
+            return (prev - 1 + modeAssets.length) % modeAssets.length;
+          });
+        }}
+        onContextMenu={(event) => {
+          if (!previewAsset) return;
+          openVersionMenu(event, previewAsset);
+        }}
+      />
 
       {playbackOpen && playbackShot ? (
         <div className="shots-playback" onClick={closePlayback}>
@@ -1510,41 +1658,107 @@ export function ShotsPage({ project }: ShotsPageProps) {
         cancelLabel="Cancel"
       />
 
-      {imageMenuPos && menuShot ? (
-        <div className="context-menu-backdrop" onClick={closeImageMenu}>
-          <div
-            className="context-menu"
-            style={{ top: imageMenuPos.y, left: imageMenuPos.x }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button type="button" className="context-menu__item" onClick={() => void replaceMenuShotAsset()}>
-              {displayMode === "clip"
-                ? (menuShotAssetPath ? "Replace clip" : "Add clip")
-                : (menuShotAssetPath ? "Replace image" : "Add image")}
-            </button>
-            {canCreateEmptyConcept ? (
-              <button type="button" className="context-menu__item" onClick={() => void createEmptyConceptImage()}>
-                Create empty image
-              </button>
-            ) : null}
-            {modeIsImage && menuShotAssetPath ? (
-              <button type="button" className="context-menu__item" onClick={() => void openMenuShotInPhotoshop()}>
-                Open in Photoshop
-              </button>
-            ) : null}
-            {modeIsImage && menuShotAssetPath ? (
-              <button type="button" className="context-menu__item" onClick={() => void copyMenuShotToClipboard()}>
-                Copy to Clipboard
-              </button>
-            ) : null}
-            {menuShotAssetPath ? (
-              <button type="button" className="context-menu__item" onClick={() => void revealMenuShotInExplorer()}>
-                {isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer"}
-              </button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      <MediaContextMenu
+        open={Boolean(imageMenuPos && menuShot)}
+        position={imageMenuPos}
+        onClose={closeImageMenu}
+        actions={[
+          {
+            key: "replace",
+            label: displayMode === "clip"
+              ? (menuShotAssetPath ? "Replace clip" : "Add clip")
+              : (menuShotAssetPath ? "Replace image" : "Add image"),
+            visible: Boolean(menuShot),
+            onSelect: async () => {
+              await replaceMenuShotAsset();
+            },
+          },
+          {
+            key: "create-empty",
+            label: "Create empty image",
+            visible: canCreateEmptyConcept,
+            onSelect: async () => {
+              await createEmptyConceptImage();
+            },
+          },
+          {
+            key: "open-ps",
+            label: "Open in Photoshop",
+            visible: modeIsImage && Boolean(menuShotAssetPath),
+            onSelect: async () => {
+              await openMenuShotInPhotoshop();
+            },
+          },
+          {
+            key: "copy",
+            label: "Copy to Clipboard",
+            visible: modeIsImage && Boolean(menuShotAssetPath),
+            onSelect: async () => {
+              await copyMenuShotToClipboard();
+            },
+          },
+          {
+            key: "reveal",
+            label: isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer",
+            visible: Boolean(menuShotAssetPath),
+            onSelect: async () => {
+              await revealMenuShotInExplorer();
+            },
+          },
+        ]}
+      />
+
+      <MediaContextMenu
+        open={Boolean(versionMenuPos && versionMenuAsset)}
+        position={versionMenuPos}
+        onClose={closeVersionMenu}
+        actions={[
+          {
+            key: "set-favorite",
+            label: "Set favorite",
+            visible: Boolean(versionMenuAsset && !versionMenuAsset.isFavorite),
+            onSelect: async () => {
+              if (!versionMenuAsset) return;
+              await setFavoriteForAsset(versionMenuAsset);
+              closeVersionMenu();
+            },
+          },
+          {
+            key: "delete-version",
+            label: "Delete version",
+            visible: Boolean(versionMenuAsset),
+            onSelect: async () => {
+              if (!versionMenuAsset) return;
+              requestDeleteAsset(versionMenuAsset);
+              closeVersionMenu();
+            },
+          },
+          {
+            key: "open-ps",
+            label: "Open in Photoshop",
+            visible: Boolean(versionMenuAsset && displayMode !== "clip"),
+            onSelect: async () => {
+              await openVersionAssetInPhotoshop();
+            },
+          },
+          {
+            key: "copy",
+            label: "Copy to Clipboard",
+            visible: Boolean(versionMenuAsset && displayMode !== "clip"),
+            onSelect: async () => {
+              await copyVersionAssetToClipboard();
+            },
+          },
+          {
+            key: "reveal",
+            label: isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer",
+            visible: Boolean(versionMenuAsset),
+            onSelect: async () => {
+              await revealVersionAssetInExplorer();
+            },
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -1686,6 +1900,11 @@ function resolveProjectDimension(value: number | null | undefined, fallback: num
     return Math.max(1, Math.round(value));
   }
   return fallback;
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 async function createWhitePng(width: number, height: number): Promise<ArrayBuffer> {

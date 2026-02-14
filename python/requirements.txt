@@ -1,2 +1,2 @@
-# Minimal dependencies for the embedded service
-# Add your own requirements as needed.
+# Python runtime dependencies (installed into local .venv by Electron PythonService)
+Pillow>=10.0.0,<12.0.0

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { IElectronAPI, PickDirOptions, PickFileOptions } from "../shared/preload";
+import type { IElectronAPI, PickDirOptions, PickFileOptions, PickSaveFileOptions } from "../shared/preload";
 import type { PythonResponse } from "../shared/ipc";
 
 const api: IElectronAPI & { saveClipboardImage: (buffer: ArrayBuffer) => Promise<string | null> } = {
@@ -21,6 +21,7 @@ const api: IElectronAPI & { saveClipboardImage: (buffer: ArrayBuffer) => Promise
   deleteDir: (path) => ipcRenderer.invoke("fs:delete-dir", { path }),
   pickFile: (options?: PickFileOptions) => ipcRenderer.invoke("dialog:pick-file", options ?? {}),
   pickDir: (options?: PickDirOptions) => ipcRenderer.invoke("dialog:pick-dir", options ?? {}),
+  pickSaveFile: (options?: PickSaveFileOptions) => ipcRenderer.invoke("dialog:save-file", options ?? {}),
   getPath: (kind) => ipcRenderer.invoke("fs:get-path", { kind }),
   normalizePaths: (items) => ipcRenderer.invoke("fs:normalize-paths", { items }),
   runPythonCommand: (cmd, args, options) => ipcRenderer.invoke("python:command", { cmd, args, timeoutMs: options?.timeoutMs }) as Promise<PythonResponse>,

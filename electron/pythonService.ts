@@ -20,6 +20,7 @@ export interface PythonCommandArgs {
 }
 
 const DEFAULT_TIMEOUT_MS = 20_000;
+const REQUIREMENTS_STAMP_FILE = ".requirements.lock";
 
 export class PythonService extends EventEmitter {
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -30,8 +31,8 @@ export class PythonService extends EventEmitter {
   async start(): Promise<void> {
     if (this.process) return;
 
-    const pythonExecutable = this.resolvePythonExecutable();
     const servicePath = this.resolveServicePath();
+    const pythonExecutable = await this.ensurePythonEnvironment();
     const pythonEnv = this.buildPythonEnv();
 
     this.process = spawn(pythonExecutable, [servicePath], {
@@ -142,6 +143,101 @@ export class PythonService extends EventEmitter {
     this.cleanup();
   }
 
+  private async ensurePythonEnvironment(): Promise<string> {
+    const runtimeRoot = this.getRuntimeRootPath();
+    const venvPath = path.join(runtimeRoot, ".venv");
+    const venvPython = this.getVenvPythonPath(runtimeRoot);
+    const requirementsPath = this.resolveRequirementsPath();
+
+    await fs.promises.mkdir(runtimeRoot, { recursive: true });
+
+    if (!fs.existsSync(venvPython)) {
+      const bootstrapPython = this.resolveBootstrapPythonExecutable();
+      await this.runCommand(bootstrapPython, ["-m", "venv", venvPath], runtimeRoot, "create venv");
+    }
+
+    await this.installRequirementsIfNeeded(venvPython, requirementsPath, venvPath, runtimeRoot);
+    return venvPython;
+  }
+
+  private async installRequirementsIfNeeded(
+    venvPython: string,
+    requirementsPath: string,
+    venvPath: string,
+    cwd: string,
+  ): Promise<void> {
+    if (!fs.existsSync(requirementsPath)) {
+      return;
+    }
+
+    const requirementsText = fs.readFileSync(requirementsPath, "utf8");
+    const normalized = requirementsText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+      .join("\n");
+
+    const stampPath = path.join(venvPath, REQUIREMENTS_STAMP_FILE);
+    const currentStamp = fs.existsSync(stampPath) ? fs.readFileSync(stampPath, "utf8") : "";
+    if (currentStamp === normalized) {
+      return;
+    }
+
+    await this.runCommand(venvPython, ["-m", "pip", "install", "-r", requirementsPath], cwd, "install requirements");
+    await fs.promises.writeFile(stampPath, normalized, "utf8");
+  }
+
+  private async runCommand(executable: string, args: string[], cwd: string, label: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(executable, args, {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: this.buildPythonEnv(),
+      });
+
+      let stderrText = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        this.emit("stderr", `[python ${label}] ${chunk.toString()}`);
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        const message = chunk.toString();
+        stderrText += message;
+        this.emit("stderr", `[python ${label}] ${message}`);
+      });
+      child.on("error", (error) => reject(error));
+      child.on("exit", (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        reject(new Error(`Python step failed (${label}, code=${code ?? "unknown"}): ${stderrText.trim()}`));
+      });
+    });
+  }
+
+  private resolveBootstrapPythonExecutable(): string {
+    const overrides = [
+      process.env.PYTHON_EXECUTABLE,
+      process.env.PYTHON,
+      process.env.PYTHON_PATH,
+    ].filter((value): value is string => Boolean(value));
+
+    for (const override of overrides) {
+      if (fs.existsSync(override)) {
+        return override;
+      }
+    }
+
+    return process.platform === "win32" ? "python.exe" : "python3";
+  }
+
+  private getVenvPythonPath(basePath: string): string {
+    const isWindows = process.platform === "win32";
+    return isWindows
+      ? path.join(basePath, ".venv", "Scripts", "python.exe")
+      : path.join(basePath, ".venv", "bin", "python");
+  }
+
   private handlePythonLine(line: string): void {
     if (!line.trim()) return;
 
@@ -175,38 +271,16 @@ export class PythonService extends EventEmitter {
     this.process = null;
   }
 
-  private resolvePythonExecutable(): string {
-    const basePath = this.getBasePath();
-    const isWindows = process.platform === "win32";
-    const candidate = isWindows
-      ? path.join(basePath, ".venv", "Scripts", "python.exe")
-      : path.join(basePath, ".venv", "bin", "python");
-
-    const overrides = [
-      process.env.PYTHON_EXECUTABLE,
-      process.env.PYTHON,
-      process.env.PYTHON_PATH,
-    ].filter((value): value is string => Boolean(value));
-
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-
-    for (const override of overrides) {
-      if (fs.existsSync(override)) {
-        return override;
-      }
-    }
-
-    return isWindows ? "python.exe" : "python";
-  }
-
   private resolveServicePath(): string {
-    const servicePath = path.join(this.getBasePath(), "python", "service.py");
+    const servicePath = path.join(this.getServiceBasePath(), "python", "service.py");
     if (!fs.existsSync(servicePath)) {
       throw new Error(`Python service entrypoint not found at ${servicePath}`);
     }
     return servicePath;
+  }
+
+  private resolveRequirementsPath(): string {
+    return path.join(this.getServiceBasePath(), "python", "requirements.txt");
   }
 
   private getBasePath(): string {
@@ -216,10 +290,32 @@ export class PythonService extends EventEmitter {
     return path.resolve(__dirname, "..", "..");
   }
 
+  private getServiceBasePath(): string {
+    if (app.isPackaged) {
+      return process.resourcesPath;
+    }
+    return this.getBasePath();
+  }
+
+  private getRuntimeRootPath(): string {
+    if (app.isPackaged) {
+      return path.join(app.getPath("userData"), "python-runtime");
+    }
+    return this.getBasePath();
+  }
+
   private buildPythonEnv(): NodeJS.ProcessEnv {
+    const runtimeRoot = this.getRuntimeRootPath();
+    const venvPath = path.join(runtimeRoot, ".venv");
+    const binDir = process.platform === "win32"
+      ? path.join(venvPath, "Scripts")
+      : path.join(venvPath, "bin");
+    const pathSeparator = process.platform === "win32" ? ";" : ":";
     return {
       ...process.env,
       PYTHONUNBUFFERED: "1",
+      VIRTUAL_ENV: venvPath,
+      PATH: `${binDir}${pathSeparator}${process.env.PATH ?? ""}`,
     };
   }
 }

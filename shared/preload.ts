@@ -15,6 +15,12 @@ export interface PickDirOptions {
   defaultPath?: string;
 }
 
+export interface PickSaveFileOptions {
+  title?: string;
+  defaultPath?: string;
+  filters?: FileFilter[];
+}
+
 export type AppPathKind = "userData" | "home";
 
 export interface IElectronAPI {
@@ -36,6 +42,7 @@ export interface IElectronAPI {
   deleteDir(path: string): Promise<void>;
   pickFile(options: PickFileOptions): Promise<DialogFileResult>;
   pickDir(options?: PickDirOptions): Promise<DialogFileResult>;
+  pickSaveFile(options?: PickSaveFileOptions): Promise<DialogFileResult>;
   getPath(kind: AppPathKind): Promise<string>;
   normalizePaths(items: string[]): Promise<string[]>;
   runPythonCommand(cmd: string, args?: Record<string, unknown>, options?: { timeoutMs?: number }): Promise<PythonResponse>;

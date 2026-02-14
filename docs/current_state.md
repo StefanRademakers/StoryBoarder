@@ -123,6 +123,17 @@ Sections:
   - list by modified time
   - set favorite
   - delete version file (if not still referenced)
+- Scene board export (toolbar):
+  - Single `Export` button in main shots toolbar.
+  - Export dialog allows settings (currently columns `X`, default 2).
+  - Export follows active mode:
+    - `Concept` mode exports concept board.
+    - `Still` mode exports still board.
+    - `Clip` mode is not supported for grid export.
+  - Uses project width/height as fixed tile size (center-fit).
+  - Includes placeholders for missing shot media so shot order stays intact.
+  - Uses Save dialog for explicit output filename/path (`.png`).
+  - After successful export, file is revealed in Finder/Explorer automatically.
 - Context menu actions:
   - replace current media
   - open in Photoshop (image modes only)
@@ -187,9 +198,19 @@ Sections:
 ## Key Electron Bridge Capabilities Used
 - File system: read/write text, write binary, ensure dir, exists, list, stat, rename, copy file/dir, delete file/dir.
 - System/file manager actions: open folder, reveal file, open file with app, copy image to clipboard.
-- Pickers: file/dir selection.
+- Pickers: file/dir selection + save-file selection.
 - App-level: set window title, open editor popout window.
 - Python command execution bridge.
+
+## Python Runtime
+- Python runs from an app-local `.venv` managed by `electron/pythonService.ts`.
+- Startup behavior:
+  - Creates `.venv` automatically if missing.
+  - Installs dependencies from `python/requirements.txt` into that `.venv`.
+  - Uses a requirements lock-stamp in `.venv` to avoid reinstalling unchanged dependencies.
+- In packaged app:
+  - service code is loaded from bundled resources (`resources/python`),
+  - runtime `.venv` is created/used under user data (`<userData>/python-runtime/.venv`).
 
 ## Known Gaps / Follow-ups
 - `Preview` and `Delivery` are still placeholders.
@@ -197,7 +218,7 @@ Sections:
 - Projects index refresh is scan-based; some metadata updates (for example thumbnail changes) may not show in Projects until reload/rescan.
 - `ShotsPage.tsx` does not expose explicit load/save error UI like `ScenesPage.tsx` does.
 - Legacy shot schema compatibility (`image`-only shot entries) is not explicitly migrated in `ShotsPage.tsx`; media may need manual reassignment for old projects.
-- Media UI is currently duplicated across pages (see audit below). Consolidation is recommended.
+- Media UI consolidation is partially implemented (shared context menu + shared lightbox now in use).
 
 ## Media Widget Audit (Current)
 
@@ -212,6 +233,7 @@ Sections:
   - Reveal in Finder/Explorer
 - Scope:
   - Single-image field component.
+  - Uses shared `MediaContextMenu`.
 
 ### 2) `FolderImageBoardsPage` (`src/pages/FolderImageBoardsPage.tsx`)
 - Used by:
@@ -229,6 +251,8 @@ Sections:
     - Reveal in Finder/Explorer
   - Videos:
     - Reveal in Finder/Explorer
+- Fullscreen uses shared `MediaLightbox`.
+- Context menus use shared `MediaContextMenu`.
 
 ### 3) Shots media UI (`src/pages/ShotsPage.tsx`)
 - Multiple media surfaces:
@@ -241,16 +265,27 @@ Sections:
   - Open in Photoshop (image modes)
   - Copy to Clipboard (image modes)
   - Reveal in Finder/Explorer
+- Right-click menu is also available in:
+  - Concept/Still/Clip versions grid tiles
+  - Fullscreen versions preview
+- Version context menu actions:
+  - Set favorite
+  - Delete version
+  - Open in Photoshop (image modes)
+  - Copy to Clipboard (image modes)
+  - Reveal in Finder/Explorer
+- Uses shared `MediaContextMenu` and shared `MediaLightbox` for versions preview.
 
-## Recommended Consolidation
-- Create shared `MediaContextMenu` component:
-  - Inputs: media kind (image/video), mode, handlers for replace/open/copy/reveal/delete/create-empty.
-  - Reuse in `ImageAssetField`, `FolderImageBoardsPage`, and `ShotsPage`.
-- Create shared `MediaLightbox` component:
-  - Handles fullscreen image/video view, keyboard nav, metadata label, optional context menu hook.
-  - Reuse for moodboards and shots preview.
-- Keep page-specific behavior through props, not duplicate JSX logic.
-- Result:
-  - One menu behavior model.
-  - Easier feature additions (for example favorite, download, open externally).
-  - Lower regression risk when changing media actions.
+## Consolidation Status
+- Implemented:
+  - Shared `MediaContextMenu` component (`src/components/common/MediaContextMenu.tsx`)
+  - Shared `MediaLightbox` component (`src/components/common/MediaLightbox.tsx`)
+  - Shared `MediaTileGrid` component (`src/components/common/MediaTileGrid.tsx`)
+  - Shared media model helpers (`src/components/common/mediaTypes.ts`)
+  - Reused in:
+    - `ImageAssetField`
+    - `FolderImageBoardsPage` (media tiles + preview + menus)
+    - `ShotsPage` (version tiles + preview + menus)
+- `MediaLightbox` now handles core keyboard behavior (`Escape`, `ArrowLeft`, `ArrowRight`) centrally.
+- Remaining optional follow-up:
+  - Add action-slot support inside `MediaLightbox` to reduce page-specific key/action glue code further.

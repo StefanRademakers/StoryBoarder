@@ -63,6 +63,9 @@ export const electron = {
   pickDir(options?: Parameters<IElectronAPI["pickDir"]>[0]): ReturnType<IElectronAPI["pickDir"]> {
     return getElectron().pickDir(options);
   },
+  pickSaveFile(options?: Parameters<IElectronAPI["pickSaveFile"]>[0]): ReturnType<IElectronAPI["pickSaveFile"]> {
+    return getElectron().pickSaveFile(options);
+  },
   getPath(kind: Parameters<IElectronAPI["getPath"]>[0]): Promise<string> {
     return getElectron().getPath(kind);
   },

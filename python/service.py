@@ -4,6 +4,8 @@ import json
 import logging
 import sys
 
+from actions.action_image_grid import create_image_grid
+
 LOGGER = logging.getLogger("storybuilder.service")
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s", stream=sys.stderr)
 
@@ -36,8 +38,20 @@ def handle_ping(_payload: dict) -> dict:
     return {"message": "pong"}
 
 
+def handle_create_image_grid(payload: dict) -> dict:
+    paths = payload.get("paths")
+    if not isinstance(paths, list):
+        paths = []
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        data = {}
+    result = create_image_grid(paths, data=data)
+    return {"message": result}
+
+
 COMMANDS = {
     "ping": handle_ping,
+    "create_image_grid": handle_create_image_grid,
 }
 
 
