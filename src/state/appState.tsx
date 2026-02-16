@@ -12,7 +12,11 @@ const LOCAL_STORAGE_ROOT_PATH_KEY = "storybuilder.projectsRootPath";
 const LOCAL_STORAGE_APP_SETTINGS_KEY = "storybuilder.appSettings";
 const DEFAULT_PROJECTS_ROOT = "Storyboards";
 const EMPTY_PROJECTS_INDEX: ProjectsIndex = { projects: [] };
-const DEFAULT_APP_SETTINGS: AppSettings = { photoshopPath: "" };
+const DEFAULT_APP_SETTINGS: AppSettings = {
+  photoshopPath: "",
+  openaiApiKey: "",
+  comfyUiLocalUrl: "http://127.0.0.1:8188/",
+};
 
 const AppStateContext = createContext<AppStateContextValue | null>(null);
 
@@ -257,6 +261,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           const parsed = JSON.parse(raw) as Partial<AppSettings>;
           const loaded: AppSettings = {
             photoshopPath: parsed.photoshopPath ?? "",
+            openaiApiKey: parsed.openaiApiKey ?? "",
+            comfyUiLocalUrl: parsed.comfyUiLocalUrl ?? "http://127.0.0.1:8188/",
           };
           appSettingsRef.current = loaded;
           setAppSettingsState(loaded);

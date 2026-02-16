@@ -3,6 +3,7 @@ import { electron } from "../../services/electron";
 import { joinPath } from "../../utils/path";
 import { MdxTextSection } from "../common/MdxTextSection";
 import { ConfirmDialog } from "../common/ConfirmDialog";
+import { useEscapeKey } from "../../hooks/useEscapeKey";
 
 interface LibraryItem {
   name: string;
@@ -40,6 +41,8 @@ export function LibrarySection({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<LibraryItem | null>(null);
   const revealLabel = isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer";
+
+  useEscapeKey(Boolean(renameError), () => setRenameError(null));
 
   const loadItems = async () => {
     await electron.ensureDir(baseDir);

@@ -32,6 +32,7 @@ const api: IElectronAPI & { saveClipboardImage: (buffer: ArrayBuffer) => Promise
   saveClipboardImage: (buffer: ArrayBuffer) => ipcRenderer.invoke("clipboard:save-image", buffer),
   setWindowTitle: (title: string) => ipcRenderer.invoke("window:set-title", { title }) as Promise<boolean>,
   openEditorPopout: (payload) => ipcRenderer.invoke("window:open-editor-popout", payload) as Promise<boolean>,
+  openScenePoolPopout: (payload) => ipcRenderer.invoke("window:open-scene-pool-popout", payload) as Promise<boolean>,
 };
 
 contextBridge.exposeInMainWorld("electronAPI", api);

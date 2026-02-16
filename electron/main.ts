@@ -17,6 +17,7 @@ import { PythonService } from "./pythonService";
 const fsPromises = fs.promises;
 const pythonService = new PythonService();
 const editorPopouts = new Map<string, InstanceType<typeof BrowserWindow>>();
+const scenePoolPopouts = new Map<string, InstanceType<typeof BrowserWindow>>();
 
 function popoutKey(payload: { projectFilePath: string; targetPath: string }): string {
   return `${payload.projectFilePath}::${payload.targetPath}`;
@@ -42,12 +43,14 @@ function attachExternalNavigationPolicy(window: InstanceType<typeof BrowserWindo
 
 async function createWindow(): Promise<void> {
   nativeTheme.themeSource = "dark";
+  const appIcon = resolveAppIconPath();
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 830,
     backgroundColor: "#1e1e1e",
     titleBarStyle: "default",
     show: true,
+    icon: appIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -81,12 +84,14 @@ async function openEditorPopout(payload: { projectFilePath: string; targetPath: 
     return true;
   }
 
+  const appIcon = resolveAppIconPath();
   const popoutWindow = new BrowserWindow({
     width: 1100,
     height: 800,
     backgroundColor: "#1e1e1e",
     titleBarStyle: "default",
     show: true,
+    icon: appIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -133,6 +138,71 @@ async function openEditorPopout(payload: { projectFilePath: string; targetPath: 
   return true;
 }
 
+async function openScenePoolPopout(payload: { projectFilePath: string; sceneId: string; title: string }): Promise<boolean> {
+  const key = `${payload.projectFilePath}::${payload.sceneId}::pool`;
+  const existing = scenePoolPopouts.get(key);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) {
+      existing.restore();
+    }
+    existing.focus();
+    return true;
+  }
+
+  const appIcon = resolveAppIconPath();
+  const popoutWindow = new BrowserWindow({
+    width: 1320,
+    height: 900,
+    backgroundColor: "#1e1e1e",
+    titleBarStyle: "default",
+    show: true,
+    icon: appIcon,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: false,
+    },
+  });
+  attachExternalNavigationPolicy(popoutWindow);
+  scenePoolPopouts.set(key, popoutWindow);
+  popoutWindow.on("closed", () => {
+    const current = scenePoolPopouts.get(key);
+    if (current === popoutWindow) {
+      scenePoolPopouts.delete(key);
+    }
+  });
+
+  const params = new URLSearchParams({
+    popout: "scenePool",
+    projectFilePath: payload.projectFilePath,
+    sceneId: payload.sceneId,
+    title: payload.title,
+  });
+
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devServerUrl) {
+    const url = new URL(devServerUrl);
+    url.search = params.toString();
+    void popoutWindow.loadURL(url.toString());
+    return true;
+  }
+
+  const indexHtml = path.join(getBasePath(), "dist", "index.html");
+  if (!fs.existsSync(indexHtml)) {
+    throw new Error(`Frontend bundle not found at ${indexHtml}. Run 'npm run build:react' first.`);
+  }
+  void popoutWindow.loadFile(indexHtml, {
+    query: {
+      popout: "scenePool",
+      projectFilePath: payload.projectFilePath,
+      sceneId: payload.sceneId,
+      title: payload.title,
+    },
+  });
+  return true;
+}
+
 function getBasePath(): string {
   if (app.isPackaged) {
     return app.getAppPath();
@@ -140,7 +210,29 @@ function getBasePath(): string {
   return path.resolve(__dirname, "..", "..");
 }
 
+function resolveAppIconPath(): string | undefined {
+  const candidates = app.isPackaged
+    ? [
+      path.join(process.resourcesPath, "icon.ico"),
+      path.join(process.resourcesPath, "assets", "icon.ico"),
+    ]
+    : [
+      path.join(getBasePath(), "icon.ico"),
+      path.join(getBasePath(), "assets", "icon.ico"),
+    ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
 app.whenReady().then(async () => {
+  if (process.platform === "win32") {
+    app.setAppUserModelId("com.mediavibe.storybuilder");
+  }
   Menu.setApplicationMenu(null);
   globalShortcut.register("CommandOrControl+Shift+I", () => {
     const win = BrowserWindow.getFocusedWindow();
@@ -364,6 +456,12 @@ ipcMain.handle(
   "window:open-editor-popout",
   async (_event, payload: { projectFilePath: string; targetPath: string; title: string }) => {
     return openEditorPopout(payload);
+  },
+);
+ipcMain.handle(
+  "window:open-scene-pool-popout",
+  async (_event, payload: { projectFilePath: string; sceneId: string; title: string }) => {
+    return openScenePoolPopout(payload);
   },
 );
 

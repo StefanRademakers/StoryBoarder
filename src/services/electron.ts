@@ -81,6 +81,9 @@ export const electron = {
   openEditorPopout(payload: { projectFilePath: string; targetPath: string; title: string }): Promise<boolean> {
     return getElectron().openEditorPopout(payload);
   },
+  openScenePoolPopout(payload: { projectFilePath: string; sceneId: string; title: string }): Promise<boolean> {
+    return getElectron().openScenePoolPopout(payload);
+  },
 } as const;
 
 export type Electron = typeof electron;

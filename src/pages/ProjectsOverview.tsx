@@ -2,6 +2,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import type { ProjectsIndex, ProjectsIndexEntry } from "../state/types";
 import { NewProjectModal } from "../components/layout/NewProjectModal";
 import { toFileUrl } from "../utils/path";
+import { useEscapeKey } from "../hooks/useEscapeKey";
 
 const PlusIcon = (
   <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
@@ -37,7 +38,11 @@ interface ProjectsOverviewProps {
   onRenameProject: (entry: ProjectsIndexEntry, nextName: string) => void | Promise<void>;
   onDuplicateProject: (entry: ProjectsIndexEntry) => void | Promise<void>;
   photoshopPath: string;
+  openaiApiKey: string;
+  comfyUiLocalUrl: string;
   onUpdatePhotoshopPath: (next: string) => void;
+  onUpdateOpenAIApiKey: (next: string) => void;
+  onUpdateComfyUiLocalUrl: (next: string) => void;
 }
 
 export function ProjectsOverview({
@@ -52,7 +57,11 @@ export function ProjectsOverview({
   onRenameProject,
   onDuplicateProject,
   photoshopPath,
+  openaiApiKey,
+  comfyUiLocalUrl,
   onUpdatePhotoshopPath,
+  onUpdateOpenAIApiKey,
+  onUpdateComfyUiLocalUrl,
 }: ProjectsOverviewProps) {
   const projects = projectsIndex?.projects ?? [];
   const [newOpen, setNewOpen] = useState(false);
@@ -65,11 +74,23 @@ export function ProjectsOverview({
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPath, setSettingsPath] = useState(photoshopPath);
+  const [settingsOpenAIApiKey, setSettingsOpenAIApiKey] = useState(openaiApiKey);
+  const [settingsComfyUiLocalUrl, setSettingsComfyUiLocalUrl] = useState(comfyUiLocalUrl);
+
+  useEscapeKey(renameOpen, () => {
+    setRenameOpen(false);
+    setRenameTarget(null);
+    setRenameError(null);
+  });
+
+  useEscapeKey(settingsOpen, () => setSettingsOpen(false));
 
   useEffect(() => {
     if (!settingsOpen) return;
     setSettingsPath(photoshopPath);
-  }, [photoshopPath, settingsOpen]);
+    setSettingsOpenAIApiKey(openaiApiKey);
+    setSettingsComfyUiLocalUrl(comfyUiLocalUrl);
+  }, [photoshopPath, openaiApiKey, comfyUiLocalUrl, settingsOpen]);
 
   useEffect(() => {
     try {
@@ -280,31 +301,51 @@ export function ProjectsOverview({
               <h3 className="modal__title">Global Settings</h3>
             </div>
             <div className="form-section">
-              <label className="form-row">
-                <span className="section-title">Photoshop location</span>
-                <div className="project-settings__path-row">
+              <div className="global-settings-grid">
+                <div className="global-settings-grid__label">Photoshop location</div>
+                <div className="global-settings-grid__value">
+                  <div className="project-settings__path-row">
+                    <input
+                      className="form-input"
+                      value={settingsPath}
+                      onChange={(event) => setSettingsPath(event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="pill-button"
+                      onClick={async () => {
+                        const picked = await window.electronAPI.pickFile({
+                          title: "Select Photoshop executable",
+                          defaultPath: settingsPath || undefined,
+                        });
+                        if (picked) {
+                          setSettingsPath(picked);
+                        }
+                      }}
+                    >
+                      Browse
+                    </button>
+                  </div>
+                </div>
+                <div className="global-settings-grid__label">OpenAI API key</div>
+                <div className="global-settings-grid__value">
                   <input
                     className="form-input"
-                    value={settingsPath}
-                    onChange={(event) => setSettingsPath(event.target.value)}
+                    value={settingsOpenAIApiKey}
+                    onChange={(event) => setSettingsOpenAIApiKey(event.target.value)}
+                    placeholder="sk-..."
                   />
-                  <button
-                    type="button"
-                    className="pill-button"
-                    onClick={async () => {
-                      const picked = await window.electronAPI.pickFile({
-                        title: "Select Photoshop executable",
-                        defaultPath: settingsPath || undefined,
-                      });
-                      if (picked) {
-                        setSettingsPath(picked);
-                      }
-                    }}
-                  >
-                    Browse
-                  </button>
                 </div>
-              </label>
+                <div className="global-settings-grid__label">ComfyUI Local</div>
+                <div className="global-settings-grid__value">
+                  <input
+                    className="form-input"
+                    value={settingsComfyUiLocalUrl}
+                    onChange={(event) => setSettingsComfyUiLocalUrl(event.target.value)}
+                    placeholder="http://127.0.0.1:8188/"
+                  />
+                </div>
+              </div>
             </div>
             <div className="modal__footer">
               <button type="button" className="pill-button" onClick={() => setSettingsOpen(false)}>
@@ -315,6 +356,8 @@ export function ProjectsOverview({
                 className="pill-button"
                 onClick={() => {
                   onUpdatePhotoshopPath(settingsPath.trim());
+                  onUpdateOpenAIApiKey(settingsOpenAIApiKey.trim());
+                  onUpdateComfyUiLocalUrl(settingsComfyUiLocalUrl.trim());
                   setSettingsOpen(false);
                 }}
               >

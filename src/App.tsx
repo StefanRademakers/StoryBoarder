@@ -8,6 +8,7 @@ import { DeliveryPage } from "./pages/DeliveryPage";
 import { MoodboardsPage } from "./pages/MoodboardsPage";
 import { CharactersPage } from "./pages/CharactersPage";
 import { EditorPopoutPage } from "./pages/EditorPopoutPage";
+import { ScenePoolPopoutPage } from "./pages/ScenePoolPopoutPage";
 import { BottomNav } from "./components/layout/BottomNav";
 import { useAppState } from "./state/appState";
 import { createProjectState } from "./state/projectTemplates";
@@ -39,19 +40,21 @@ export default function App() {
 
   const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const isEditorPopout = searchParams.get("popout") === "editor";
+  const isScenePoolPopout = searchParams.get("popout") === "scenePool";
   const popoutProjectFilePath = searchParams.get("projectFilePath");
   const popoutTargetPath = searchParams.get("targetPath");
+  const popoutSceneId = searchParams.get("sceneId");
   const popoutTitle = searchParams.get("title") ?? "Editor";
 
   const [activePage, setActivePage] = useState<PageKey>("projects");
   const projectAvailable = Boolean(project);
 
   useEffect(() => {
-    if (!isEditorPopout) return;
+    if (!isEditorPopout && !isScenePoolPopout) return;
     if (!popoutProjectFilePath) return;
     if (projectFilePath === popoutProjectFilePath) return;
     void loadProject(popoutProjectFilePath);
-  }, [isEditorPopout, popoutProjectFilePath, loadProject, projectFilePath]);
+  }, [isEditorPopout, isScenePoolPopout, popoutProjectFilePath, loadProject, projectFilePath]);
 
   useEffect(() => {
     if (!projectAvailable && activePage !== "projects") {
@@ -60,7 +63,7 @@ export default function App() {
   }, [projectAvailable, activePage]);
 
   useEffect(() => {
-    if (isEditorPopout) return;
+    if (isEditorPopout || isScenePoolPopout) return;
     const titleMap: Partial<Record<PageKey, string>> = {
       preview: "StoryBuilder - Preview",
       moodboards: "StoryBuilder - Moodboards",
@@ -75,7 +78,7 @@ export default function App() {
     } catch {
       // ignore when preload is not available
     }
-  }, [activePage, project, isEditorPopout]);
+  }, [activePage, project, isEditorPopout, isScenePoolPopout]);
 
   const handleChangeRootPath = useCallback(async () => {
     const picked = await electron.pickDir({
@@ -161,6 +164,19 @@ export default function App() {
       return <EditorPopoutPage project={project} targetPath={popoutTargetPath} title={popoutTitle} />;
     }
 
+    if (isScenePoolPopout) {
+      if (!project || !popoutSceneId) {
+        return (
+          <div className="page">
+            <section className="panel">
+              <p className="muted">Loading scene pool...</p>
+            </section>
+          </div>
+        );
+      }
+      return <ScenePoolPopoutPage project={project} sceneId={popoutSceneId} title={popoutTitle} />;
+    }
+
     if (activePage === "projects") {
       return (
         <ProjectsOverview
@@ -177,8 +193,16 @@ export default function App() {
           onRenameProject={handleRenameProject}
           onDuplicateProject={handleDuplicateProject}
           photoshopPath={appSettings.photoshopPath}
+          openaiApiKey={appSettings.openaiApiKey}
+          comfyUiLocalUrl={appSettings.comfyUiLocalUrl}
           onUpdatePhotoshopPath={(next) => {
             updateAppSettings((current) => ({ ...current, photoshopPath: next }));
+          }}
+          onUpdateOpenAIApiKey={(next) => {
+            updateAppSettings((current) => ({ ...current, openaiApiKey: next }));
+          }}
+          onUpdateComfyUiLocalUrl={(next) => {
+            updateAppSettings((current) => ({ ...current, comfyUiLocalUrl: next }));
           }}
         />
       );
@@ -216,11 +240,15 @@ export default function App() {
   }, [
     activePage,
     isEditorPopout,
+    isScenePoolPopout,
+    popoutSceneId,
     popoutTargetPath,
     popoutTitle,
     projectsIndex,
     projectsRootPath,
     appSettings.photoshopPath,
+    appSettings.openaiApiKey,
+    appSettings.comfyUiLocalUrl,
     loading,
     lastError,
     handleOpenProject,
@@ -236,7 +264,7 @@ export default function App() {
   return (
     <div className="app-root">
       <main className="app-content">{content}</main>
-      {!isEditorPopout ? (
+      {!isEditorPopout && !isScenePoolPopout ? (
         <footer className="app-footer">
           <div className="footer-left">
             {loading ? <span className="badge badge--queued">Loading...</span> : null}

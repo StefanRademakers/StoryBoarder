@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useEscapeKey } from "../../hooks/useEscapeKey";
 
 interface NewProjectModalProps {
   open: boolean;
@@ -15,6 +16,8 @@ export function NewProjectModal({ open, onClose, onCreate }: NewProjectModalProp
     if (!open) return;
     setTimeout(() => inputRef.current?.select(), 0);
   }, [open]);
+
+  useEscapeKey(open, onClose);
 
   if (!open) return null;
 

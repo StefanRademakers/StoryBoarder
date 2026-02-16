@@ -9,6 +9,7 @@ import { MediaContextMenu } from "../components/common/MediaContextMenu";
 import { MediaLightbox } from "../components/common/MediaLightbox";
 import { MediaTileGrid } from "../components/common/MediaTileGrid";
 import { inferMediaKind, type MediaItem } from "../components/common/mediaTypes";
+import { useEscapeKey } from "../hooks/useEscapeKey";
 
 interface FolderImageBoardsPageProps {
   project: ProjectState;
@@ -58,6 +59,14 @@ export function FolderImageBoardsPage({
   const [actionError, setActionError] = useState<string | null>(null);
   const [imageMenuItem, setImageMenuItem] = useState<BoardMedia | null>(null);
   const [imageMenuPos, setImageMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+  useEscapeKey(dialogOpen, () => setDialogOpen(false));
+  useEscapeKey(renameOpen, () => {
+    setRenameOpen(false);
+    setRenameTarget(null);
+    setRenameValue("");
+    setRenameError(null);
+  });
 
   const loadItems = async () => {
     await electron.ensureDir(rootDir);
@@ -282,27 +291,17 @@ export function FolderImageBoardsPage({
   useEffect(() => {
     if (previewIndex === null) return;
     const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closePreview();
-      } else if (event.key === "Delete") {
+      if (event.key === "Delete") {
         if (currentImage) {
+          event.preventDefault();
           setConfirmTarget(currentImage);
           setConfirmOpen(true);
         }
-      } else if (event.key === "Enter") {
-        if (!currentImage) return;
-        const configuredPath = appSettings.photoshopPath.trim();
-        if (configuredPath && !isVideoFile(currentImage.path)) {
-          void electron.openWithApp(configuredPath, currentImage.path);
-        } else if (!configuredPath && !isVideoFile(currentImage.path)) {
-          setActionError("Set Photoshop location in Projects > Settings.");
-        }
-        void electron.revealInFileManager(currentImage.path);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [appSettings.photoshopPath, previewIndex, images.length, currentImage?.path]);
+  }, [previewIndex, currentImage?.path]);
 
   const confirmDelete = async () => {
     if (!confirmTarget) return;
@@ -482,6 +481,14 @@ export function FolderImageBoardsPage({
         onContextMenu={(event) => {
           if (!currentImage) return;
           openImageMenu(event, currentImage);
+        }}
+        onCopy={() => {
+          if (!currentImage) return;
+          void copyImageToClipboard(currentImage);
+        }}
+        onReveal={() => {
+          if (!currentImage) return;
+          void revealImageInExplorer(currentImage);
         }}
       />
 

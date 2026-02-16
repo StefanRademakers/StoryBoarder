@@ -34,6 +34,8 @@ export interface ProjectsIndex {
 
 export interface AppSettings {
   photoshopPath: string;
+  openaiApiKey: string;
+  comfyUiLocalUrl: string;
 }
 
 export interface AppState {

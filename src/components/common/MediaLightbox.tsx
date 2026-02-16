@@ -10,6 +10,8 @@ interface MediaLightboxProps {
   onClose: () => void;
   onNext?: () => void;
   onPrev?: () => void;
+  onCopy?: () => void;
+  onReveal?: () => void;
   onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
 }
 
@@ -22,6 +24,8 @@ export function MediaLightbox({
   onClose,
   onNext,
   onPrev,
+  onCopy,
+  onReveal,
   onContextMenu,
 }: MediaLightboxProps) {
   useEffect(() => {
@@ -40,16 +44,26 @@ export function MediaLightbox({
       if (event.key === "ArrowLeft" && onPrev) {
         event.preventDefault();
         onPrev();
+        return;
+      }
+      if (event.key === "Enter" && onReveal) {
+        event.preventDefault();
+        onReveal();
+        return;
+      }
+      if ((event.key === "c" || event.key === "C") && event.ctrlKey && onCopy) {
+        event.preventDefault();
+        onCopy();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, onNext, onPrev, open, path]);
+  }, [onClose, onCopy, onNext, onPrev, onReveal, open, path]);
 
   if (!open || !path) return null;
 
   return (
-    <div className="moodboard-preview" onClick={onClose}>
+    <div className="moodboard-preview" onClick={onClose} onDoubleClick={onClose}>
       <div
         className="moodboard-preview__inner"
         onClick={(event) => event.stopPropagation()}

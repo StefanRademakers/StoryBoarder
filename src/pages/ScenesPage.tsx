@@ -19,6 +19,8 @@ interface SceneMeta {
   image?: string;
   timeOfDay?: string;
   lighting?: string;
+  characterPropBoards?: string[];
+  moodboards?: string[];
 }
 
 interface ScenesIndex {
@@ -35,6 +37,7 @@ interface SceneEditorProps {
 }
 
 const EMPTY_INDEX: ScenesIndex = { scenes: [] };
+const MAX_SCENE_BOARD_REFS = 5;
 
 export function ScenesPage({ project }: ScenesPageProps) {
   const { projectFilePath, appSettings } = useAppState();
@@ -193,6 +196,8 @@ export function ScenesPage({ project }: ScenesPageProps) {
       image: "",
       timeOfDay: "",
       lighting: "",
+      characterPropBoards: [],
+      moodboards: [],
     };
 
     const dir = joinPath(scenesRoot, id);
@@ -337,6 +342,8 @@ function SceneEditor({
 
   const [scriptValue, setScriptValue] = useState("");
   const [shotlistValue, setShotlistValue] = useState("");
+  const [characterBoardOptions, setCharacterBoardOptions] = useState<string[]>([]);
+  const [moodboardOptions, setMoodboardOptions] = useState<string[]>([]);
   const [docLoadError, setDocLoadError] = useState<string | null>(null);
   const docsSeqRef = useRef(0);
 
@@ -383,6 +390,36 @@ function SceneEditor({
     };
   }, [scene.id, sceneDir, scriptPath, shotlistPath]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadBoardOptions = async () => {
+      const charactersDir = joinPath(project.paths.root, "characters");
+      const moodboardsDir = joinPath(project.paths.root, "moodboards");
+      await Promise.all([electron.ensureDir(charactersDir), electron.ensureDir(moodboardsDir)]);
+      const [characterEntries, moodEntries] = await Promise.all([
+        electron.listDir(charactersDir),
+        electron.listDir(moodboardsDir),
+      ]);
+      if (cancelled) return;
+      setCharacterBoardOptions(
+        characterEntries
+          .filter((entry) => entry.isDirectory)
+          .map((entry) => entry.name)
+          .sort((a, b) => a.localeCompare(b)),
+      );
+      setMoodboardOptions(
+        moodEntries
+          .filter((entry) => entry.isDirectory)
+          .map((entry) => entry.name)
+          .sort((a, b) => a.localeCompare(b)),
+      );
+    };
+    void loadBoardOptions();
+    return () => {
+      cancelled = true;
+    };
+  }, [project.paths.root]);
+
   const updateSceneImage = async (paths: string[]) => {
     if (!paths.length) return;
     const input = paths[0];
@@ -392,6 +429,25 @@ function SceneEditor({
 
     await electron.copyFile(input, destination);
     onUpdateScene(scene.id, (previous) => ({ ...previous, image: fileName }));
+  };
+
+  const characterSlots = boardSlots(scene.characterPropBoards);
+  const moodboardSlots = boardSlots(scene.moodboards);
+
+  const updateBoardSlot = (
+    kind: "characterPropBoards" | "moodboards",
+    slotIndex: number,
+    value: string,
+  ) => {
+    onUpdateScene(scene.id, (previous) => {
+      const currentSlots = boardSlots(kind === "characterPropBoards" ? previous.characterPropBoards : previous.moodboards);
+      currentSlots[slotIndex] = value.trim();
+      const nextValues = normalizeBoardRefs(currentSlots);
+      if (kind === "characterPropBoards") {
+        return { ...previous, characterPropBoards: nextValues };
+      }
+      return { ...previous, moodboards: nextValues };
+    });
   };
 
   return (
@@ -465,6 +521,50 @@ function SceneEditor({
               />
               <span>[x] Active</span>
             </label>
+          </div>
+        </div>
+
+        <div className="scene-reference-grid">
+          <div className="scene-reference-grid__column">
+            <h3 className="section-title">Character and props boards</h3>
+            {characterSlots.map((value, idx) => (
+              <label key={`character-board-slot-${idx}`} className="form-row">
+                <span className="muted">Reference {idx + 1}</span>
+                <select
+                  className="form-input"
+                  value={value}
+                  onChange={(event) => updateBoardSlot("characterPropBoards", idx, event.target.value)}
+                >
+                  <option value="">-- none --</option>
+                  {boardSelectOptions(characterBoardOptions, characterSlots).map((option) => (
+                    <option key={`character-board-option-${option}`} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+
+          <div className="scene-reference-grid__column">
+            <h3 className="section-title">Moodboards</h3>
+            {moodboardSlots.map((value, idx) => (
+              <label key={`moodboard-slot-${idx}`} className="form-row">
+                <span className="muted">Reference {idx + 1}</span>
+                <select
+                  className="form-input"
+                  value={value}
+                  onChange={(event) => updateBoardSlot("moodboards", idx, event.target.value)}
+                >
+                  <option value="">-- none --</option>
+                  {boardSelectOptions(moodboardOptions, moodboardSlots).map((option) => (
+                    <option key={`moodboard-option-${option}`} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
           </div>
         </div>
       </section>
@@ -551,6 +651,8 @@ function normalizeSceneOrder(scenes: SceneMeta[]): SceneMeta[] {
       image: scene.image ?? "",
       timeOfDay: scene.timeOfDay ?? "",
       lighting: scene.lighting ?? "",
+      characterPropBoards: normalizeBoardRefs(scene.characterPropBoards),
+      moodboards: normalizeBoardRefs(scene.moodboards),
     }));
 }
 
@@ -587,6 +689,8 @@ function normalizeLoadedScenes(input: SceneMeta[]): {
       || scene.image === undefined
       || scene.timeOfDay === undefined
       || scene.lighting === undefined
+      || scene.characterPropBoards === undefined
+      || scene.moodboards === undefined
       || id !== originalId
     ) {
       didNormalize = true;
@@ -600,6 +704,8 @@ function normalizeLoadedScenes(input: SceneMeta[]): {
       image: scene.image ?? "",
       timeOfDay: scene.timeOfDay ?? "",
       lighting: scene.lighting ?? "",
+      characterPropBoards: normalizeBoardRefs(scene.characterPropBoards),
+      moodboards: normalizeBoardRefs(scene.moodboards),
     };
   });
 
@@ -629,4 +735,43 @@ function makeStableId(prefix: string): string {
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function normalizeBoardRefs(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const cleaned = entry.trim();
+    if (!cleaned || seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    out.push(cleaned);
+    if (out.length >= MAX_SCENE_BOARD_REFS) break;
+  }
+  return out;
+}
+
+function boardSlots(values: unknown): string[] {
+  const normalized = normalizeBoardRefs(values);
+  const slots = Array.from({ length: MAX_SCENE_BOARD_REFS }, () => "");
+  for (let idx = 0; idx < normalized.length && idx < MAX_SCENE_BOARD_REFS; idx += 1) {
+    slots[idx] = normalized[idx];
+  }
+  return slots;
+}
+
+function boardSelectOptions(options: string[], selectedValues: string[]): string[] {
+  const set = new Set<string>();
+  for (const option of options) {
+    const cleaned = option.trim();
+    if (!cleaned) continue;
+    set.add(cleaned);
+  }
+  for (const selected of selectedValues) {
+    const cleaned = selected.trim();
+    if (!cleaned) continue;
+    set.add(cleaned);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
 }

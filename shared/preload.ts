@@ -49,4 +49,5 @@ export interface IElectronAPI {
   ping(): Promise<boolean>;
   setWindowTitle(title: string): Promise<boolean>;
   openEditorPopout(payload: { projectFilePath: string; targetPath: string; title: string }): Promise<boolean>;
+  openScenePoolPopout(payload: { projectFilePath: string; sceneId: string; title: string }): Promise<boolean>;
 }

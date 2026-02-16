@@ -1,18 +1,19 @@
 {
   "appId": "com.example.newelectronreactapp",
-  "productName": "NewElectronReactApp",
+  "productName": "StoryBuilder",
   "directories": {
     "output": "release",
     "buildResources": "assets"
   },
-  "artifactName": "${productName}-Setup-${version}.${ext}",
+  "artifactName": "${productName}-setup-${version}.${ext}",
   "files": [
     "dist-electron/**/*",
     "dist/**/*"
   ],
   "extraResources": [
     { "from": "python", "to": "python" },
-    { "from": ".venv", "to": ".venv" }
+    { "from": ".venv", "to": ".venv" },
+    { "from": "assets/icon.ico", "to": "icon.ico" }
   ],
   "win": {
     "icon": "assets/icon.ico"
