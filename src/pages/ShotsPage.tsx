@@ -10,6 +10,7 @@ import { MediaContextMenu } from "../components/common/MediaContextMenu";
 import { MediaLightbox } from "../components/common/MediaLightbox";
 import { MediaTileGrid } from "../components/common/MediaTileGrid";
 import { inferMediaKind, type MediaItem } from "../components/common/mediaTypes";
+import { SegmentedControl, type SegmentedControlOption } from "../components/common/SegmentedControl";
 import { useEscapeKey } from "../hooks/useEscapeKey";
 
 interface ShotsPageProps {
@@ -129,7 +130,11 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const [poolMenuAsset, setPoolMenuAsset] = useState<ScenePoolAsset | null>(null);
   const [poolMenuPos, setPoolMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [exportColumns, setExportColumns] = useState(2);
+  const [exportColumnsText, setExportColumnsText] = useState("2");
+  const [exportStartIndexText, setExportStartIndexText] = useState("1");
+  const [exportEndIndexText, setExportEndIndexText] = useState("1");
+  const [exportResizeEnabled, setExportResizeEnabled] = useState(false);
+  const [exportMaxLongestEdgeText, setExportMaxLongestEdgeText] = useState("2024");
   const [gridExportBusy, setGridExportBusy] = useState(false);
   const [gridExportMessage, setGridExportMessage] = useState<string | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -169,6 +174,28 @@ export function ShotsPage({ project }: ShotsPageProps) {
   );
 
   const sceneDir = activeScene ? joinPath(scenesRoot, activeScene.id) : null;
+  const modeOptions: Array<SegmentedControlOption<ShotDisplayMode>> = [
+    {
+      value: "concept",
+      label: "Concept",
+      icon: <img src="icons/concept.png" width={16} height={16} alt="" aria-hidden />,
+    },
+    {
+      value: "reference",
+      label: "Reference",
+      icon: <img src="icons/still.png" width={16} height={16} alt="" aria-hidden />,
+    },
+    {
+      value: "still",
+      label: "Still",
+      icon: <img src="icons/still.png" width={16} height={16} alt="" aria-hidden />,
+    },
+    {
+      value: "clip",
+      label: "Clip",
+      icon: <img src="icons/clip.png" width={16} height={16} alt="" aria-hidden />,
+    },
+  ];
 
   const getFavoriteRelative = (shot: ShotItem, mode: ShotDisplayMode): string => {
     if (mode === "concept") {
@@ -935,7 +962,19 @@ export function ShotsPage({ project }: ShotsPageProps) {
     }
     const mode: "concept" | "reference" | "still" = displayMode;
 
-    const columns = Math.max(1, Math.min(24, Math.round(exportColumns) || 2));
+    const columnsRaw = parsePositiveInteger(exportColumnsText);
+    const columns = Math.max(1, Math.min(24, columnsRaw ?? 2));
+    const totalShots = shots.length;
+    const startRaw = parsePositiveInteger(exportStartIndexText);
+    const endRaw = parsePositiveInteger(exportEndIndexText);
+    const startIndex = Math.max(1, Math.min(totalShots, startRaw ?? 1));
+    const endIndex = Math.max(startIndex, Math.min(totalShots, endRaw ?? totalShots));
+    const exportShots = shots.slice(startIndex - 1, endIndex);
+    if (!exportShots.length) {
+      setGridExportMessage("No shots in selected range.");
+      return;
+    }
+    const maxLongestEdge = parsePositiveInteger(exportMaxLongestEdgeText) ?? 2024;
     const width = resolveProjectDimension(project.settings?.width, 1920);
     const height = resolveProjectDimension(project.settings?.height, 1080);
     const modeName = mode === "concept" ? "concept_board" : mode === "reference" ? "reference_board" : "still_board";
@@ -946,11 +985,12 @@ export function ShotsPage({ project }: ShotsPageProps) {
       filters: [{ name: "PNG Image", extensions: ["png"] }],
     });
     if (!pickedFile) return;
-    const items = shots.map((shot, idx) => {
+    const items = exportShots.map((shot, idx) => {
       const absolute = shotAssetPath(shot, mode);
+      const shotNumber = startIndex + idx;
       return {
         path: absolute,
-        label: `SHOT ${String(idx + 1).padStart(3, "0")}`,
+        label: `SHOT ${String(shotNumber).padStart(3, "0")}`,
       };
     });
 
@@ -972,6 +1012,8 @@ export function ShotsPage({ project }: ShotsPageProps) {
             addLabels: true,
             textColor: "#ffffff",
             backgroundColor: "#ffffff",
+            resizeToMaxLongestEdge: exportResizeEnabled,
+            maxLongestEdge,
             outputPath: pickedFile,
           },
         },
@@ -992,6 +1034,16 @@ export function ShotsPage({ project }: ShotsPageProps) {
     } finally {
       setGridExportBusy(false);
     }
+  };
+
+  const openExportDialog = () => {
+    const totalShots = shots.length || 1;
+    setExportColumnsText("2");
+    setExportStartIndexText("1");
+    setExportEndIndexText(String(totalShots));
+    setExportResizeEnabled(false);
+    setExportMaxLongestEdgeText("2024");
+    setExportDialogOpen(true);
   };
 
   useEffect(() => {
@@ -1354,10 +1406,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
       <div className="project-page__content">
         <header className="page-header">
           <div>
-            <h1>Shots</h1>
-            <p className="page-subtitle">
-              {activeScene ? `Shots for ${activeScene.name}` : "Select a scene first."}
-            </p>
+            <h1>{activeScene ? `${activeScene.name} Shots` : "Shots"}</h1>
           </div>
         </header>
 
@@ -1394,45 +1443,18 @@ export function ShotsPage({ project }: ShotsPageProps) {
                     type="button"
                     className="pill-button"
                     disabled={!shots.length || gridExportBusy}
-                    onClick={() => setExportDialogOpen(true)}
+                    onClick={openExportDialog}
                   >
                     Export
                   </button>
                 </div>
-                <div className="shots-toolbar__modes">
-                  <button
-                    type="button"
-                    className={displayMode === "concept" ? "pill-button shots-mode-button shots-mode-button--active" : "pill-button shots-mode-button"}
-                    onClick={() => setDisplayMode("concept")}
-                  >
-                    <img src="icons/concept.png" width={16} height={16} alt="" aria-hidden />
-                    Concept
-                  </button>
-                  <button
-                    type="button"
-                    className={displayMode === "reference" ? "pill-button shots-mode-button shots-mode-button--active" : "pill-button shots-mode-button"}
-                    onClick={() => setDisplayMode("reference")}
-                  >
-                    <img src="icons/still.png" width={16} height={16} alt="" aria-hidden />
-                    Reference
-                  </button>
-                  <button
-                    type="button"
-                    className={displayMode === "still" ? "pill-button shots-mode-button shots-mode-button--active" : "pill-button shots-mode-button"}
-                    onClick={() => setDisplayMode("still")}
-                  >
-                    <img src="icons/still.png" width={16} height={16} alt="" aria-hidden />
-                    Still
-                  </button>
-                  <button
-                    type="button"
-                    className={displayMode === "clip" ? "pill-button shots-mode-button shots-mode-button--active" : "pill-button shots-mode-button"}
-                    onClick={() => setDisplayMode("clip")}
-                  >
-                    <img src="icons/clip.png" width={16} height={16} alt="" aria-hidden />
-                    Clip
-                  </button>
-                </div>
+                <SegmentedControl
+                  className="shots-toolbar__modes"
+                  ariaLabel="Shot mode"
+                  options={modeOptions}
+                  value={displayMode}
+                  onChange={setDisplayMode}
+                />
               </div>
               {gridExportMessage ? <p className="muted">{gridExportMessage}</p> : null}
             </section>
@@ -1749,7 +1771,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
       ) : null}
 
       {exportDialogOpen ? (
-        <div className="modal-backdrop" onClick={() => setExportDialogOpen(false)}>
+        <div className="modal-backdrop">
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal__header">
               <h3 className="modal__title">Export Grid</h3>
@@ -1758,19 +1780,54 @@ export function ShotsPage({ project }: ShotsPageProps) {
               <p className="muted">
                 Mode: <strong>{displayMode === "concept" ? "Concept" : displayMode === "reference" ? "Reference" : displayMode === "still" ? "Still" : "Clip (not supported)"}</strong>
               </p>
-              <label className="form-row">
-                <span className="section-title">Columns (X)</span>
+              <div className="export-grid-fields">
+                <label className="form-row">
+                  <span className="section-title">Columns (X)</span>
+                  <input
+                    className="form-input"
+                    type="text"
+                    inputMode="numeric"
+                    value={exportColumnsText}
+                    onChange={(event) => setExportColumnsText(event.target.value)}
+                  />
+                </label>
+                <label className="form-row">
+                  <span className="section-title">Start index:</span>
+                  <input
+                    className="form-input"
+                    type="text"
+                    inputMode="numeric"
+                    value={exportStartIndexText}
+                    onChange={(event) => setExportStartIndexText(event.target.value)}
+                  />
+                </label>
+                <label className="form-row">
+                  <span className="section-title">End index:</span>
+                  <input
+                    className="form-input"
+                    type="text"
+                    inputMode="numeric"
+                    value={exportEndIndexText}
+                    onChange={(event) => setExportEndIndexText(event.target.value)}
+                  />
+                </label>
+              </div>
+              <label className="export-grid-resize-row">
                 <input
-                  className="form-input"
-                  type="number"
-                  min={1}
-                  max={24}
-                  value={exportColumns}
-                  onChange={(event) => {
-                    const next = Number.parseInt(event.target.value, 10);
-                    setExportColumns(Number.isFinite(next) ? next : 2);
-                  }}
+                  type="checkbox"
+                  checked={exportResizeEnabled}
+                  onChange={(event) => setExportResizeEnabled(event.target.checked)}
                 />
+                <span>Resize to max:</span>
+                <input
+                  className="form-input export-grid-resize-input"
+                  type="text"
+                  inputMode="numeric"
+                  value={exportMaxLongestEdgeText}
+                  onChange={(event) => setExportMaxLongestEdgeText(event.target.value)}
+                  disabled={!exportResizeEnabled}
+                />
+                <span>(longest edge)</span>
               </label>
               <p className="muted">
                 Tile size: {resolveProjectDimension(project.settings?.width, 1920)} x {resolveProjectDimension(project.settings?.height, 1080)}
@@ -2253,6 +2310,15 @@ function resolveProjectDimension(value: number | null | undefined, fallback: num
     return Math.max(1, Math.round(value));
   }
   return fallback;
+}
+
+function parsePositiveInteger(value: string): number | null {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (!/^\d+$/.test(normalized)) return null;
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return null;
+  return parsed;
 }
 
 function toErrorMessage(error: unknown): string {

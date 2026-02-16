@@ -48,6 +48,7 @@ def _parse_settings(data):
     output_path = ""
     tile_outline_color = "#5079a5"
     tile_outline_width = 2
+    resize_to_max_longest_edge = False
 
     if isinstance(data, dict):
         if "xTiles" in data:
@@ -105,6 +106,7 @@ def _parse_settings(data):
                 tile_outline_width = int(data.get("tileOutlineWidth"))
             except Exception:
                 pass
+        resize_to_max_longest_edge = bool(data.get("resizeToMaxLongestEdge", resize_to_max_longest_edge))
 
     if columns < 1:
         columns = 1
@@ -141,6 +143,7 @@ def _parse_settings(data):
         output_path,
         tile_outline_color,
         tile_outline_width,
+        resize_to_max_longest_edge,
     )
 
 
@@ -196,7 +199,7 @@ def create_image_grid(paths, report_progress=None, data=None):
     - The height of the output image is dynamic based on the number of rows.
     - The output PNG is saved in the same folder as the input images.
     """
-    columns, max_longest_edge, background_color, padding, add_labels, text_color, tile_prefix, tile_width, tile_height, fit_mode, output_dir, output_name_prefix, output_path, tile_outline_color, tile_outline_width = _parse_settings(data)
+    columns, max_longest_edge, background_color, padding, add_labels, text_color, tile_prefix, tile_width, tile_height, fit_mode, output_dir, output_name_prefix, output_path, tile_outline_color, tile_outline_width, resize_to_max_longest_edge = _parse_settings(data)
     items = _normalize_items(paths, data)
     if not items:
         return "No images provided."
@@ -248,18 +251,28 @@ def create_image_grid(paths, report_progress=None, data=None):
         if add_labels:
             draw = ImageDraw.Draw(tile)
             font_size = max(12, int(min(tile.width, tile.height) * 0.06))
-            font = _load_font(font_size)
-            try:
-                bbox = draw.textbbox((0, 0), label_text, font=font)
-                text_w = bbox[2] - bbox[0]
-                text_h = bbox[3] - bbox[1]
-            except Exception:
-                text_w, text_h = draw.textsize(label_text, font=font)
             margin = max(6, int(font_size * 0.3))
+            max_text_width = max(1, tile.width - (margin * 2))
+
+            # Scale text down until it fits to avoid clipped labels in small tiles.
+            while font_size > 8:
+                font = _load_font(font_size)
+                try:
+                    bbox = draw.textbbox((0, 0), label_text, font=font)
+                    text_w = bbox[2] - bbox[0]
+                    text_h = bbox[3] - bbox[1]
+                except Exception:
+                    text_w, text_h = draw.textsize(label_text, font=font)
+                if text_w <= max_text_width:
+                    break
+                font_size -= 1
+
+            band_height = min(tile.height, text_h + (margin * 2))
+            band_top = tile.height - band_height
+            draw.rectangle((0, band_top, tile.width, tile.height), fill=(0, 0, 0, 255))
+
             x = margin
-            y = max(0, tile.height - text_h - margin)
-            # subtle backdrop for readability on bright images
-            draw.rectangle((x - 4, y - 2, x + text_w + 4, y + text_h + 2), fill=(0, 0, 0, 80))
+            y = band_top + max(0, (band_height - text_h) // 2)
             draw.text((x, y), label_text, font=font, fill=text_rgba)
 
         if tile_outline_width > 0:
@@ -313,6 +326,14 @@ def create_image_grid(paths, report_progress=None, data=None):
         safe_prefix = re.sub(r"[^a-zA-Z0-9._-]+", "_", output_name_prefix).strip("_") or "grid_overview"
         output_filename = f"{safe_prefix}_{timestamp}.png"
         final_output_path = os.path.join(base_folder, output_filename)
+
+    if resize_to_max_longest_edge:
+        longest_edge = max(grid_img.width, grid_img.height)
+        if longest_edge > max_longest_edge:
+            scale = max_longest_edge / float(longest_edge)
+            resized_w = max(1, int(round(grid_img.width * scale)))
+            resized_h = max(1, int(round(grid_img.height * scale)))
+            grid_img = grid_img.resize((resized_w, resized_h), Image.LANCZOS)
 
     grid_img.save(final_output_path)
 

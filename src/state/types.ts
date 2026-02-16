@@ -3,8 +3,6 @@ export interface ProjectState {
   id: string;
   name: string;
   description: string;
-  script?: string;
-  shotlist?: string;
   thumbnail?: string;
   createdAt: string;
   lastModified: string;

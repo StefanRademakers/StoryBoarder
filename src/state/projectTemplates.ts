@@ -28,8 +28,6 @@ export function createProjectState(params: { name: string; rootPath: string; des
       framerate: null,
     },
     images: [],
-    script: "",
-    shotlist: "",
     thumbnail: "",
   };
 }

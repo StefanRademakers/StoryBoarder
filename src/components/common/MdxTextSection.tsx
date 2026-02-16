@@ -9,17 +9,24 @@ import {
   toolbarPlugin,
   linkPlugin,
   imagePlugin,
-  BoldItalicUnderlineToggles,
-  BlockTypeSelect,
-  ListsToggle,
   UndoRedo,
   InsertThematicBreak,
-  Separator,
   thematicBreakPlugin,
+  applyFormat$,
+  applyListType$,
+  currentFormat$,
+  currentListType$,
+  iconComponentFor$,
+  IS_BOLD,
+  IS_ITALIC,
+  IS_UNDERLINE,
 } from "@mdxeditor/editor";
+import { useCellValue, usePublisher } from "@mdxeditor/gurx";
 import { debounce } from "../../utils/debounce";
 import { electron } from "../../services/electron";
 import { getDirectoryName, isAbsolutePath, joinPath, toFileUrl } from "../../utils/path";
+import { SegmentedControl, type SegmentedControlOption } from "./SegmentedControl";
+import { ToggleButtonGroup, type ToggleButtonOption } from "./ToggleButtonGroup";
 
 interface MdxTextSectionProps {
   value: string;
@@ -259,14 +266,7 @@ export function MdxTextSection({
             toolbarContents: () => (
               <>
                 <UndoRedo />
-                <Separator />
-                <BlockTypeSelect />
-                <BoldItalicUnderlineToggles />
-                <ListsToggle />
-                <button type="button" onClick={handleInsertLink} title="Insert link">
-                  Link
-                </button>
-                <Separator />
+                <MarkdownToolbarToggles onInsertLink={handleInsertLink} />
                 <InsertThematicBreak />
               </>
             ),
@@ -318,6 +318,102 @@ export function MdxTextSection({
     <section className="panel script-panel">
       {content}
     </section>
+  );
+}
+
+type FormatKey = "bold" | "italic" | "underline";
+type ListKey = "bullet" | "number" | "check";
+
+function MarkdownToolbarToggles({ onInsertLink }: { onInsertLink: () => void }) {
+  const currentFormat = useCellValue(currentFormat$);
+  const currentListType = useCellValue(currentListType$);
+  const iconComponentFor = useCellValue(iconComponentFor$);
+  const applyFormat = usePublisher(applyFormat$);
+  const applyListType = usePublisher(applyListType$);
+
+  const selectedFormats: Array<FormatKey> = [];
+  if ((currentFormat & IS_BOLD) !== 0) selectedFormats.push("bold");
+  if ((currentFormat & IS_ITALIC) !== 0) selectedFormats.push("italic");
+  if ((currentFormat & IS_UNDERLINE) !== 0) selectedFormats.push("underline");
+
+  const formatOptions: Array<ToggleButtonOption<FormatKey>> = [
+    {
+      value: "bold",
+      icon: iconComponentFor("format_bold"),
+      title: "Bold",
+      ariaLabel: "Bold",
+    },
+    {
+      value: "italic",
+      icon: iconComponentFor("format_italic"),
+      title: "Italic",
+      ariaLabel: "Italic",
+    },
+    {
+      value: "underline",
+      icon: iconComponentFor("format_underlined"),
+      title: "Underline",
+      ariaLabel: "Underline",
+    },
+  ];
+
+  const listOptions: Array<SegmentedControlOption<ListKey>> = [
+    {
+      value: "bullet",
+      icon: iconComponentFor("format_list_bulleted"),
+      title: "Bulleted list",
+      ariaLabel: "Bulleted list",
+    },
+    {
+      value: "number",
+      icon: iconComponentFor("format_list_numbered"),
+      title: "Numbered list",
+      ariaLabel: "Numbered list",
+    },
+    {
+      value: "check",
+      icon: iconComponentFor("format_list_checked"),
+      title: "Checklist",
+      ariaLabel: "Checklist",
+    },
+  ];
+
+  return (
+    <div className="mdx-toolbar-controls">
+      <ToggleButtonGroup
+        className="mdx-toolbar-format"
+        ariaLabel="Text formatting"
+        options={formatOptions}
+        values={selectedFormats}
+        onChange={(nextValues) => {
+          const keys: FormatKey[] = ["bold", "italic", "underline"];
+          for (const key of keys) {
+            const before = selectedFormats.includes(key);
+            const after = nextValues.includes(key);
+            if (before !== after) {
+              applyFormat(key);
+              return;
+            }
+          }
+        }}
+      />
+      <SegmentedControl
+        className="mdx-toolbar-lists"
+        ariaLabel="List type"
+        options={listOptions}
+        value={currentListType}
+        onChange={(value) => applyListType(value)}
+      />
+      <button
+        type="button"
+        className="mdx-toolbar-icon-button"
+        onClick={onInsertLink}
+        title="Insert link"
+        aria-label="Insert link"
+      >
+        {iconComponentFor("link")}
+      </button>
+    </div>
   );
 }
 

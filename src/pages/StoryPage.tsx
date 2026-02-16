@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ProjectState } from "../state/types";
 import { SidebarNav } from "../components/common/SidebarNav";
 import { useAppState } from "../state/appState";
@@ -26,9 +26,30 @@ interface StoryPageProps {
 
 export function StoryPage({ project }: StoryPageProps) {
   const [activeSection, setActiveSection] = useState<SectionKey>("settings");
+  const [scriptMarkdown, setScriptMarkdown] = useState("");
+  const [shotlistMarkdown, setShotlistMarkdown] = useState("");
   const { updateProject, projectFilePath, appSettings } = useAppState();
   const scriptTargetPath = joinPath(joinPath(project.paths.root, "script"), "script.md");
   const shotlistTargetPath = joinPath(joinPath(project.paths.root, "script"), "shotlist.md");
+
+  useEffect(() => {
+    let canceled = false;
+
+    const loadMarkdown = async () => {
+      const [scriptText, shotlistText] = await Promise.all([
+        readTextIfExists(scriptTargetPath),
+        readTextIfExists(shotlistTargetPath),
+      ]);
+      if (canceled) return;
+      setScriptMarkdown(scriptText);
+      setShotlistMarkdown(shotlistText);
+    };
+
+    void loadMarkdown();
+    return () => {
+      canceled = true;
+    };
+  }, [scriptTargetPath, shotlistTargetPath]);
 
   return (
     <div className="page project-page project-page--with-sidebar">
@@ -197,8 +218,8 @@ export function StoryPage({ project }: StoryPageProps) {
                 </button>
               </div>
               <MdxTextSection
-                value={project.script ?? ""}
-                onChange={(markdown) => updateProject((draft) => { draft.script = markdown; })}
+                value={scriptMarkdown}
+                onChange={setScriptMarkdown}
                 projectRoot={project.paths.root}
                 fileName="script.md"
                 targetPath={scriptTargetPath}
@@ -231,8 +252,8 @@ export function StoryPage({ project }: StoryPageProps) {
               </button>
             </div>
             <MdxTextSection
-              value={project.shotlist ?? ""}
-              onChange={(markdown) => updateProject((draft) => { draft.shotlist = markdown; })}
+              value={shotlistMarkdown}
+              onChange={setShotlistMarkdown}
               projectRoot={project.paths.root}
               fileName="shotlist.md"
               targetPath={shotlistTargetPath}
@@ -274,4 +295,14 @@ function getImageExtension(path: string): string | null {
   if (lower.endsWith(".jpeg")) return ".jpeg";
   if (lower.endsWith(".webp")) return ".webp";
   return null;
+}
+
+async function readTextIfExists(path: string): Promise<string> {
+  const exists = await electron.exists(path);
+  if (!exists) return "";
+  try {
+    return await electron.readText(path);
+  } catch {
+    return "";
+  }
 }
