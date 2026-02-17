@@ -53,6 +53,7 @@ interface ShotsIndex {
 }
 
 type ShotDisplayMode = "concept" | "reference" | "still" | "clip";
+type CandidateTab = "stills" | "clips";
 type PlaybackMediaKind = "video" | "image" | "placeholder";
 
 interface ShotModeAsset {
@@ -67,6 +68,12 @@ interface ScenePoolAsset {
   name: string;
   path: string;
   source: string;
+  mtimeMs: number;
+}
+
+interface CandidateAsset {
+  name: string;
+  path: string;
   mtimeMs: number;
 }
 
@@ -129,6 +136,13 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const [poolPreviewIndex, setPoolPreviewIndex] = useState<number | null>(null);
   const [poolMenuAsset, setPoolMenuAsset] = useState<ScenePoolAsset | null>(null);
   const [poolMenuPos, setPoolMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [candidatesOpen, setCandidatesOpen] = useState(false);
+  const [candidateTab, setCandidateTab] = useState<CandidateTab>("stills");
+  const [candidateLoading, setCandidateLoading] = useState(false);
+  const [candidateAssets, setCandidateAssets] = useState<CandidateAsset[]>([]);
+  const [candidatePreviewIndex, setCandidatePreviewIndex] = useState<number | null>(null);
+  const [candidateMenuAsset, setCandidateMenuAsset] = useState<CandidateAsset | null>(null);
+  const [candidateMenuPos, setCandidateMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportColumnsText, setExportColumnsText] = useState("2");
   const [exportStartIndexText, setExportStartIndexText] = useState("1");
@@ -164,6 +178,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const playbackShot = playbackOpen ? shots[playbackIndex] ?? null : null;
   const previewAsset = previewIndex === null ? null : modeAssets[previewIndex] ?? null;
   const poolPreviewAsset = poolPreviewIndex === null ? null : poolAssets[poolPreviewIndex] ?? null;
+  const candidatePreviewAsset = candidatePreviewIndex === null ? null : candidateAssets[candidatePreviewIndex] ?? null;
   const versionMediaItems = useMemo<Array<MediaItem & ShotModeAsset>>(
     () => modeAssets.map((asset) => ({ ...asset, id: asset.path, kind: inferMediaKind(asset.path) })),
     [modeAssets],
@@ -171,6 +186,10 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const poolMediaItems = useMemo<Array<MediaItem & ScenePoolAsset>>(
     () => poolAssets.map((asset) => ({ ...asset, id: asset.path, kind: "image" as const })),
     [poolAssets],
+  );
+  const candidateMediaItems = useMemo<Array<MediaItem & CandidateAsset>>(
+    () => candidateAssets.map((asset) => ({ ...asset, id: asset.path, kind: inferMediaKind(asset.path) })),
+    [candidateAssets],
   );
 
   const sceneDir = activeScene ? joinPath(scenesRoot, activeScene.id) : null;
@@ -181,11 +200,6 @@ export function ShotsPage({ project }: ShotsPageProps) {
       icon: <img src="icons/concept.png" width={16} height={16} alt="" aria-hidden />,
     },
     {
-      value: "reference",
-      label: "Reference",
-      icon: <img src="icons/still.png" width={16} height={16} alt="" aria-hidden />,
-    },
-    {
       value: "still",
       label: "Still",
       icon: <img src="icons/still.png" width={16} height={16} alt="" aria-hidden />,
@@ -193,6 +207,24 @@ export function ShotsPage({ project }: ShotsPageProps) {
     {
       value: "clip",
       label: "Clip",
+      icon: <img src="icons/clip.png" width={16} height={16} alt="" aria-hidden />,
+    },
+    {
+      value: "reference",
+      label: "Reference",
+      icon: <img src="icons/still.png" width={16} height={16} alt="" aria-hidden />,
+    },
+  ];
+
+  const candidateTabOptions: Array<SegmentedControlOption<CandidateTab>> = [
+    {
+      value: "stills",
+      label: "Candidate Stills",
+      icon: <img src="icons/still.png" width={16} height={16} alt="" aria-hidden />,
+    },
+    {
+      value: "clips",
+      label: "Candidate Clips",
       icon: <img src="icons/clip.png" width={16} height={16} alt="" aria-hidden />,
     },
   ];
@@ -518,7 +550,52 @@ export function ShotsPage({ project }: ShotsPageProps) {
     setPoolOpen(false);
     setPoolPreviewIndex(null);
     setPoolAssets([]);
+    setCandidatesOpen(false);
+    setCandidatePreviewIndex(null);
+    setCandidateAssets([]);
+    closeCandidateMenu();
   }, [activeSceneId]);
+
+  useEffect(() => {
+    if (!candidatesOpen || !activeScene) return;
+    void refreshCandidateAssets();
+  }, [candidatesOpen, candidateTab, activeScene?.id]);
+
+  useEffect(() => {
+    if (!candidatesOpen || !activeScene) return;
+
+    const onPaste = async (event: ClipboardEvent) => {
+      const clipboardData = event.clipboardData;
+      if (!clipboardData) return;
+
+      const imageItem = Array.from(clipboardData.items).find((item) => item.type.startsWith("image/"));
+      if (!imageItem) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      if (candidateTab !== "stills") return;
+      if (isEditableTarget(event.target)) return;
+
+      const file = imageItem.getAsFile();
+      if (!file) return;
+
+      try {
+        const buffer = await file.arrayBuffer();
+        const tempPath = await window.electronAPI.saveClipboardImage(buffer);
+        if (!tempPath) return;
+        await importCandidatePaths([tempPath]);
+      } catch {
+        // Ignore paste failures and keep UI responsive.
+      }
+    };
+
+    window.addEventListener("paste", onPaste, true);
+    return () => {
+      window.removeEventListener("paste", onPaste, true);
+    };
+  }, [candidatesOpen, activeScene?.id, candidateTab]);
 
   useEffect(() => {
     void loadShots(activeSceneId);
@@ -628,19 +705,19 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
       if (event.key === "F2") {
         event.preventDefault();
-        setDisplayMode("reference");
+        setDisplayMode("still");
         return;
       }
 
       if (event.key === "F3") {
         event.preventDefault();
-        setDisplayMode("still");
+        setDisplayMode("clip");
         return;
       }
 
       if (event.key === "F4") {
         event.preventDefault();
-        setDisplayMode("clip");
+        setDisplayMode("reference");
         return;
       }
 
@@ -927,6 +1004,83 @@ export function ShotsPage({ project }: ShotsPageProps) {
     event.stopPropagation();
     setPoolMenuAsset(asset);
     setPoolMenuPos({ x: event.clientX, y: event.clientY });
+  };
+
+  const candidateFolderName = (tab: CandidateTab): "CandidateStills" | "CandidateClips" => (
+    tab === "stills" ? "CandidateStills" : "CandidateClips"
+  );
+
+  const candidateDirForScene = (sceneId: string, tab: CandidateTab) => (
+    joinPath(joinPath(scenesRoot, sceneId), candidateFolderName(tab))
+  );
+
+  const loadCandidateAssets = async (sceneId: string, tab: CandidateTab) => {
+    const dir = candidateDirForScene(sceneId, tab);
+    await electron.ensureDir(dir);
+    const entries = await electron.listDir(dir);
+    const rows: CandidateAsset[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile) continue;
+      const path = joinPath(dir, entry.name);
+      const stat = await electron.stat(path);
+      rows.push({
+        name: entry.name,
+        path,
+        mtimeMs: stat?.mtimeMs ?? 0,
+      });
+    }
+    rows.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
+    setCandidateAssets(rows);
+  };
+
+  const refreshCandidateAssets = async () => {
+    if (!activeScene) return;
+    setCandidateLoading(true);
+    try {
+      await loadCandidateAssets(activeScene.id, candidateTab);
+    } finally {
+      setCandidateLoading(false);
+    }
+  };
+
+  const importCandidatePaths = async (paths: string[]) => {
+    if (!activeScene || !paths.length) return;
+    const targetDir = candidateDirForScene(activeScene.id, candidateTab);
+    await electron.ensureDir(targetDir);
+
+    for (const inputPath of paths) {
+      try {
+        const base = getBaseName(inputPath);
+        const fileName = await uniqueFileName(targetDir, base);
+        const destination = joinPath(targetDir, fileName);
+        await electron.copyFile(inputPath, destination);
+      } catch {
+        // Skip non-file entries or copy failures and continue with remaining paths.
+      }
+    }
+
+    await refreshCandidateAssets();
+  };
+
+  const openCandidates = async () => {
+    if (!activeScene) return;
+    setCandidatesOpen(true);
+    setCandidatePreviewIndex(null);
+    setCandidateMenuAsset(null);
+    setCandidateMenuPos(null);
+    await refreshCandidateAssets();
+  };
+
+  const closeCandidateMenu = () => {
+    setCandidateMenuAsset(null);
+    setCandidateMenuPos(null);
+  };
+
+  const openCandidateMenu = (event: React.MouseEvent, asset: CandidateAsset) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setCandidateMenuAsset(asset);
+    setCandidateMenuPos({ x: event.clientX, y: event.clientY });
   };
 
   const openPlayback = () => {
@@ -1277,6 +1431,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
   useEscapeKey(versionsOpen, closeVersionsBrowser);
   useEscapeKey(poolOpen, () => setPoolOpen(false));
+  useEscapeKey(candidatesOpen, () => setCandidatesOpen(false));
   useEscapeKey(exportDialogOpen, () => setExportDialogOpen(false));
 
   const setFavoriteForAsset = async (asset: ShotModeAsset) => {
@@ -1438,6 +1593,16 @@ export function ShotsPage({ project }: ShotsPageProps) {
                     disabled={!activeScene}
                   >
                     Pool
+                  </button>
+                  <button
+                    type="button"
+                    className="pill-button"
+                    onClick={() => {
+                      void openCandidates();
+                    }}
+                    disabled={!activeScene}
+                  >
+                    Candidates
                   </button>
                   <button
                     type="button"
@@ -1770,6 +1935,59 @@ export function ShotsPage({ project }: ShotsPageProps) {
         </div>
       ) : null}
 
+      {candidatesOpen ? (
+        <div className="modal-backdrop" onClick={() => setCandidatesOpen(false)}>
+          <div className="modal shot-pool-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal__header">
+              <h3 className="modal__title">Candidates</h3>
+              <button type="button" className="pill-button" onClick={() => setCandidatesOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <SegmentedControl
+              className="shot-candidates__tabs"
+              ariaLabel="Candidates tab"
+              options={candidateTabOptions}
+              value={candidateTab}
+              onChange={setCandidateTab}
+            />
+
+            <DropOrBrowse
+              className="moodboard-dropzone"
+              label="Drop media here or click to browse"
+              enablePasteContextMenu={false}
+              onPathsSelected={(paths) => {
+                void importCandidatePaths(paths);
+              }}
+              browse={async () => {
+                const picked = await window.electronAPI.pickFile({
+                  title: candidateTab === "stills" ? "Select candidate still" : "Select candidate clip",
+                  filters: [
+                    { name: "Media", extensions: ["png", "jpg", "jpeg", "webp", ...VIDEO_EXTENSIONS] },
+                  ],
+                });
+                return picked;
+              }}
+            />
+
+            {candidateLoading ? <p className="muted">Loading candidates...</p> : null}
+            {!candidateLoading && !candidateAssets.length ? (
+              <p className="muted">No assets in this folder yet.</p>
+            ) : null}
+            {!candidateLoading && candidateAssets.length ? (
+              <MediaTileGrid
+                items={candidateMediaItems}
+                className="moodboard-grid shot-pool-grid"
+                getKey={(item) => item.path}
+                onOpen={(_item, idx) => setCandidatePreviewIndex(idx)}
+                onContextMenu={(event, item) => openCandidateMenu(event, item)}
+              />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {exportDialogOpen ? (
         <div className="modal-backdrop">
           <div className="modal" onClick={(event) => event.stopPropagation()}>
@@ -1918,6 +2136,40 @@ export function ShotsPage({ project }: ShotsPageProps) {
         onContextMenu={(event) => {
           if (!poolPreviewAsset) return;
           openPoolMenu(event, poolPreviewAsset);
+        }}
+      />
+
+      <MediaLightbox
+        open={Boolean(candidatePreviewAsset)}
+        path={candidatePreviewAsset?.path ?? null}
+        isVideo={candidatePreviewAsset ? inferMediaKind(candidatePreviewAsset.path) === "video" : false}
+        name={candidatePreviewAsset?.name}
+        onClose={() => setCandidatePreviewIndex(null)}
+        onNext={() => {
+          if (!candidateAssets.length) return;
+          setCandidatePreviewIndex((prev) => {
+            if (prev === null) return prev;
+            return (prev + 1) % candidateAssets.length;
+          });
+        }}
+        onPrev={() => {
+          if (!candidateAssets.length) return;
+          setCandidatePreviewIndex((prev) => {
+            if (prev === null) return prev;
+            return (prev - 1 + candidateAssets.length) % candidateAssets.length;
+          });
+        }}
+        onCopy={() => {
+          if (!candidatePreviewAsset || inferMediaKind(candidatePreviewAsset.path) === "video") return;
+          void electron.copyImageToClipboard(candidatePreviewAsset.path);
+        }}
+        onReveal={() => {
+          if (!candidatePreviewAsset) return;
+          void electron.revealInFileManager(candidatePreviewAsset.path);
+        }}
+        onContextMenu={(event) => {
+          if (!candidatePreviewAsset) return;
+          openCandidateMenu(event, candidatePreviewAsset);
         }}
       />
 
@@ -2142,6 +2394,34 @@ export function ShotsPage({ project }: ShotsPageProps) {
               if (!poolMenuAsset) return;
               await electron.revealInFileManager(poolMenuAsset.path);
               closePoolMenu();
+            },
+          },
+        ]}
+      />
+
+      <MediaContextMenu
+        open={Boolean(candidateMenuPos && candidateMenuAsset)}
+        position={candidateMenuPos}
+        onClose={closeCandidateMenu}
+        actions={[
+          {
+            key: "copy",
+            label: "Copy to Clipboard",
+            visible: Boolean(candidateMenuAsset && inferMediaKind(candidateMenuAsset.path) !== "video"),
+            onSelect: async () => {
+              if (!candidateMenuAsset) return;
+              await electron.copyImageToClipboard(candidateMenuAsset.path);
+              closeCandidateMenu();
+            },
+          },
+          {
+            key: "reveal",
+            label: isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer",
+            visible: Boolean(candidateMenuAsset),
+            onSelect: async () => {
+              if (!candidateMenuAsset) return;
+              await electron.revealInFileManager(candidateMenuAsset.path);
+              closeCandidateMenu();
             },
           },
         ]}

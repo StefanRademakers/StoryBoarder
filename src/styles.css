@@ -32,7 +32,7 @@ button {
 
 .page { display: flex; flex-direction: column; gap: 24px; margin: 16px; }
 .page-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-.page-header h1 { margin: 0; font-size: 32px; font-weight: 600; }
+.page-header h1 { margin: 0; font-size: 20px; font-weight: 600; }
 .page-subtitle { margin: 4px 0 0; color: var(--color-text-muted); font-size: 14px; }
 .page-header .actions { display: flex; gap: 14px; }
 .page-header .actions button,
@@ -1297,6 +1297,10 @@ button {
   font-size: 11px;
   color: var(--color-text-muted);
   word-break: break-word;
+}
+
+.shot-candidates__tabs {
+  align-self: flex-start;
 }
 
 .export-grid-fields {

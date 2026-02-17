@@ -1,14 +1,15 @@
 # Current State (StoryBuilder)
 
-Updated from current source code on 2026-02-13.
+Updated from current source code on 2026-02-17.
 
 ## Stability Snapshot
 - Scenes + Shots are functionally solid for core production flow (create/edit/reorder/delete + on-disk persistence).
 - Data integrity protections are present:
-  - Scene index normalization/repair on load.
+  - Canonical scene ID validation and strict scene-index load validation.
   - Serialized scene index writes (queued persistence).
+  - Atomic-ish scene rename flow (folder move/copy fallback + index write + rollback handling).
   - Shot media reference cleanup/repair on load.
-- Remaining risk areas are mostly around migration edge cases and error surfacing (details in Known Gaps).
+- Remaining risk areas are primarily UI-size/complexity (notably `ShotsPage`) and limited automated test coverage.
 
 ## What This App Is
 StoryBuilder is an Electron + React desktop app for creating visual story projects. The app is page-based:
@@ -41,7 +42,8 @@ When creating a project, workspace scaffolding includes:
 - `moodboards/`
 - `characters/`
 
-`project.json` stores core project state (name, settings, thumbnail path, script text, shotlist text, timestamps, etc.).
+`project.json` stores core project state (name, settings, thumbnail path, timestamps, etc.).  
+Script and shotlist markdown are file-based (`script/script.md`, `script/shotlist.md`) rather than mirrored in `project.json`.
 
 ## Page Status
 
@@ -50,6 +52,8 @@ When creating a project, workspace scaffolding includes:
 - Supports create, open, reload, change root.
 - Global app settings are managed here (header gear button):
   - `Photoshop location` (single app-wide value, not per project).
+  - `OpenAI API key`.
+  - `ComfyUI Local` URL (default: `http://127.0.0.1:8188/`).
 - Context menu supports rename and duplicate (archive/backup are present but disabled placeholders).
 - Tile image uses `thumbnail` path from project state.
 
@@ -60,10 +64,10 @@ Sections:
   - Thumbnail copied to `resources/project_main_image.<ext>`.
   - Project settings fields: width, height, framerate.
 - Script:
-  - MDX editor for `script/script.md`, also mirrored in `project.json` (`script`).
+  - MDX editor for `script/script.md`.
   - Supports pop-out editor window.
 - Shotlist:
-  - MDX editor for `script/shotlist.md`, also mirrored in `project.json` (`shotlist`).
+  - MDX editor for `script/shotlist.md`.
   - Supports pop-out editor window.
 - Notes / Todos / Prompts:
   - Markdown files stored in `notes/`, `todos/`, and `prompts/`.
@@ -91,6 +95,11 @@ Sections:
 - Scene index is `scenes/scenes.json`.
 - Supports create, select, reorder, rename, active flag toggle, delete.
 - Each scene gets its own folder: `scenes/<sceneId>/`.
+- Scene name field is read-only in editor; rename is explicit via `Rename` button + modal.
+- Header includes `Open folder` action for the active scene.
+- Scene IDs are canonical and human-readable:
+  - `scene-<slug>-<token>`
+  - slug uses `[a-z0-9_]+` (no `-`).
 - Create flow scaffolds per-scene docs immediately:
   - `scene.md`
   - `shotlist.md`
@@ -104,19 +113,22 @@ Sections:
   - `scene.md`
   - `shotlist.md`
 - Per-scene image stored inside the scene folder (`scene_image.<ext>`); index stores filename.
-- Includes load-time normalization/repair for malformed scene records (IDs, ordering, missing metadata defaults).
-- Duplicate scene ID repair includes directory copy-forward (`fromId -> toId`) when needed.
+- Includes load-time normalization for ordering/metadata defaults and strict validation for scene IDs.
 - Scene editor uses MDX sections for script + shotlist with pop-out editor support.
+- Rename operation updates both:
+  - scene name in `scenes.json`
+  - scene ID + scene folder path (`scenes/<oldId>` -> `scenes/<newId>`)
+  - with retry/fallback handling for Windows `EPERM` rename locks.
 
 ### Shots
 - Fully implemented (not placeholder).
 - Scene-specific shots index: `scenes/<sceneId>/shots.json`.
 - Scene-specific shot assets: `scenes/<sceneId>/shots/<shotId>/`.
 - Supports create, select, reorder, edit, delete.
-- Multi-mode media system (per shot): `concept`, `still`, `clip`.
+- Multi-mode media system (per shot): `concept`, `reference`, `still`, `clip`.
 - Each mode stores:
-  - asset list (`conceptAssets` / `stillAssets` / `clipAssets`)
-  - favorite pointer (`favoriteConcept` / `favoriteStill` / `favoriteClip`)
+  - asset list (`conceptAssets` / `referenceAssets` / `stillAssets` / `clipAssets`)
+  - favorite pointer (`favoriteConcept` / `favoriteReference` / `favoriteStill` / `favoriteClip`)
 - New shot creation scaffolds mode folders under shot directory.
 - Media ingest supports drag/drop + browse for all modes, plus clipboard paste for image modes.
 - Built-in versions browser per mode:
@@ -125,9 +137,13 @@ Sections:
   - delete version file (if not still referenced)
 - Scene board export (toolbar):
   - Single `Export` button in main shots toolbar.
-  - Export dialog allows settings (currently columns `X`, default 2).
+  - Export dialog allows:
+    - columns (`X`)
+    - start index / end index
+    - optional resize-to-max-longest-edge toggle
   - Export follows active mode:
     - `Concept` mode exports concept board.
+    - `Reference` mode exports reference board.
     - `Still` mode exports still board.
     - `Clip` mode is not supported for grid export.
   - Uses project width/height as fixed tile size (center-fit).
@@ -151,6 +167,14 @@ Sections:
 - Keyboard timeline navigation across shots and scenes via `Ctrl + Arrow` keys.
 - `Ctrl + N` creates a new shot after the current selection.
 - Load-time media repair removes invalid/missing asset refs and reassigns favorites safely.
+- Includes a scene-level `Candidates` workflow:
+  - `Candidates` button opens modal.
+  - Tabbed folders per active scene:
+    - `scenes/<sceneId>/CandidateStills`
+    - `scenes/<sceneId>/CandidateClips`
+  - Drop/browse import copies files into active candidate folder.
+  - Candidate grid uses shared tile/lightbox behavior (image+video compatible).
+  - When Candidates modal is open, `Ctrl+V` imports clipboard image into `CandidateStills` (no shot replacement).
 
 ### Preview
 - Placeholder page.
@@ -169,6 +193,8 @@ Sections:
 - `image?: string` (filename in scene folder)
 - `timeOfDay?: string`
 - `lighting?: string`
+- `characterPropBoards?: string[]`
+- `moodboards?: string[]`
 
 ### `scenes/<sceneId>/shots.json`
 `shots` array items contain:
@@ -180,9 +206,11 @@ Sections:
 - `action?: string`
 - `camera?: string`
 - `favoriteConcept?: string` (relative path like `shots/<shotId>/concept/<file>`)
+- `favoriteReference?: string` (relative path like `shots/<shotId>/reference/<file>`)
 - `favoriteStill?: string` (relative path like `shots/<shotId>/still/<file>`)
 - `favoriteClip?: string` (relative path like `shots/<shotId>/clip/<file>`)
 - `conceptAssets?: string[]`
+- `referenceAssets?: string[]`
 - `stillAssets?: string[]`
 - `clipAssets?: string[]`
 
@@ -217,7 +245,6 @@ Sections:
 - `PropsPage.tsx` exists but is not currently wired into app navigation.
 - Projects index refresh is scan-based; some metadata updates (for example thumbnail changes) may not show in Projects until reload/rescan.
 - `ShotsPage.tsx` does not expose explicit load/save error UI like `ScenesPage.tsx` does.
-- Legacy shot schema compatibility (`image`-only shot entries) is not explicitly migrated in `ShotsPage.tsx`; media may need manual reassignment for old projects.
 - Media UI consolidation is partially implemented (shared context menu + shared lightbox now in use).
 
 ## Media Widget Audit (Current)
