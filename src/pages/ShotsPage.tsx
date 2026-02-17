@@ -79,9 +79,12 @@ interface ShotItem {
   stillAssets?: string[];
   clipAssets?: string[];
   durationSeconds?: number | null;
-  framing?: string;
+  angle?: string;
+  shotSize?: string;
+  characterFraming?: string;
+  movement?: string;
   action?: string;
-  camera?: string;
+  notes?: string;
 }
 
 interface ShotsIndex {
@@ -642,9 +645,12 @@ export function ShotsPage({ project }: ShotsPageProps) {
       stillAssets: [],
       clipAssets: [],
       durationSeconds: 2,
-      framing: "",
+      angle: "",
+      shotSize: "",
+      characterFraming: "",
+      movement: "",
       action: "",
-      camera: "",
+      notes: "",
     }), options);
   };
 
@@ -971,7 +977,6 @@ export function ShotsPage({ project }: ShotsPageProps) {
     createShot: createShotCrud,
     moveShot,
     deleteShot,
-    updateDescription,
     updateShot,
   } = useShotsCrud({
     scenesRoot,
@@ -1259,7 +1264,6 @@ export function ShotsPage({ project }: ShotsPageProps) {
               onBrowseShotMedia={browseShotMedia}
               onOpenVersionsBrowser={openVersionsBrowser}
               onUpdateShot={updateShot}
-              onUpdateDescription={updateDescription}
             />
           </>
         )}

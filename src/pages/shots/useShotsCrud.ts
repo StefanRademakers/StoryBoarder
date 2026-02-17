@@ -8,9 +8,12 @@ interface ShotItemLike {
   order: number;
   description: string;
   durationSeconds?: number | null;
-  framing?: string;
+  angle?: string;
+  shotSize?: string;
+  characterFraming?: string;
+  movement?: string;
   action?: string;
-  camera?: string;
+  notes?: string;
   favoriteConcept?: string;
   favoriteReference?: string;
   favoriteStill?: string;

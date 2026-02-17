@@ -1380,8 +1380,98 @@ button {
 
 .shot-editor__meta {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+}
+
+.shot-editor__classification-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.shot-editor__classification-row--full {
+  margin-top: 12px;
+}
+
+.shot-suggestion-field .section-title {
+  white-space: nowrap;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.shot-suggestion-field {
+  position: relative;
+}
+
+.shot-suggestion-field__control {
+  position: relative;
+}
+
+.shot-suggestion-field__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: max(100%, 360px);
+  max-width: calc(100vw - 48px);
+  z-index: 30;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #171a1f;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.shot-suggestion-field__menu--open-up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.shot-suggestion-field__menu--align-right {
+  left: auto;
+  right: 0;
+}
+
+.shot-suggestion-field__option {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  padding: 9px 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.shot-suggestion-field__option:hover,
+.shot-suggestion-field__option:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.shot-suggestion-field__abbr {
+  color: var(--color-text);
+  font-weight: 600;
+  font-size: 12px;
+  flex: 0 0 86px;
+}
+
+.shot-suggestion-field__name {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shot-suggestion-field__empty {
+  padding: 10px;
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 
 .shot-editor__textarea {
@@ -1391,6 +1481,11 @@ button {
 
 .shot-editor__textarea--small {
   min-height: 72px;
+}
+
+.shot-editor__textarea--autosize {
+  resize: none;
+  overflow: hidden;
 }
 
 .shots-playback {
@@ -1511,6 +1606,10 @@ button {
 
   .shot-editor__meta {
     grid-template-columns: 1fr;
+  }
+
+  .shot-editor__classification-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .shot-editor {

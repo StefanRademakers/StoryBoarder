@@ -15,9 +15,15 @@ interface ShotItem {
   stillAssets?: string[];
   clipAssets?: string[];
   durationSeconds?: number | null;
+  angle?: string;
+  shotSize?: string;
+  characterFraming?: string;
+  movement?: string;
+  // Legacy fields kept for migration.
   framing?: string;
   action?: string;
   camera?: string;
+  notes?: string;
 }
 
 interface ShotsIndex {
@@ -55,9 +61,12 @@ export function normalizeShotsIndex(index: ShotsIndex): ShotsIndex {
           durationSeconds: typeof shot.durationSeconds === "number" && Number.isFinite(shot.durationSeconds)
             ? shot.durationSeconds
             : 2,
-          framing: shot.framing ?? "",
+          angle: shot.angle ?? "",
+          shotSize: shot.shotSize ?? shot.framing ?? "",
+          characterFraming: shot.characterFraming ?? "",
+          movement: shot.movement ?? shot.camera ?? "",
           action: shot.action ?? "",
-          camera: shot.camera ?? "",
+          notes: shot.notes ?? "",
         };
       })
       .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)),
