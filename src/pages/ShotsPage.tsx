@@ -12,6 +12,36 @@ import { MediaTileGrid } from "../components/common/MediaTileGrid";
 import { inferMediaKind, type MediaItem } from "../components/common/mediaTypes";
 import { SegmentedControl, type SegmentedControlOption } from "../components/common/SegmentedControl";
 import { useEscapeKey } from "../hooks/useEscapeKey";
+import { ExportGridDialog } from "./shots/ExportGridDialog";
+import { ShotsToolbar } from "./shots/ShotsToolbar";
+import { ShotVersionsModal } from "./shots/ShotVersionsModal";
+import type { ShotDisplayMode, ShotModeAsset } from "./shots/types";
+import {
+  VIDEO_EXTENSIONS,
+  SHOT_MODES,
+  capitalizeMode,
+  createWhitePng,
+  fileExtension,
+  formatDurationLabel,
+  getBaseName,
+  imageExtensionFromName,
+  isEditableTarget,
+  isFileAllowedForMode,
+  isImageFile,
+  isMacPlatform,
+  isWebOrDataUrl,
+  modeFolderName,
+  normalizeBoardRefs,
+  normalizeShotsIndex,
+  parsePositiveInteger,
+  playbackModeLabel,
+  resolveProjectDimension,
+  resolveShotDurationMs,
+  sanitizeFileName,
+  toErrorMessage,
+  uniqueFileName,
+  uniqueStrings,
+} from "./shots/utils";
 
 interface ShotsPageProps {
   project: ProjectState;
@@ -52,17 +82,8 @@ interface ShotsIndex {
   shots: ShotItem[];
 }
 
-type ShotDisplayMode = "concept" | "reference" | "still" | "clip";
 type CandidateTab = "stills" | "clips";
 type PlaybackMediaKind = "video" | "image" | "placeholder";
-
-interface ShotModeAsset {
-  name: string;
-  path: string;
-  relative: string;
-  mtimeMs: number;
-  isFavorite: boolean;
-}
 
 interface ScenePoolAsset {
   name: string;
@@ -91,7 +112,6 @@ interface InlineFullscreenAsset {
 
 const EMPTY_SCENES: ScenesIndex = { scenes: [] };
 const EMPTY_SHOTS: ShotsIndex = { shots: [] };
-const VIDEO_EXTENSIONS = ["mp4", "mov", "webm", "mkv", "avi", "m4v"] as const;
 const VersionsIcon = (
   <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden>
     <path
@@ -1541,6 +1561,18 @@ export function ShotsPage({ project }: ShotsPageProps) {
     })();
   }, [versionsOpen, activeSceneId, activeShot?.id, displayMode, shotsIndex.shots]);
 
+  const handleToolbarPoolClick = (openPopout: boolean) => {
+    if (openPopout && projectFilePath && activeScene) {
+      void electron.openScenePoolPopout({
+        projectFilePath,
+        sceneId: activeScene.id,
+        title: `${activeScene.name} - Pool`,
+      });
+      return;
+    }
+    void openPool();
+  };
+
   return (
     <div className="page project-page project-page--with-sidebar">
       <div className="sidebar-nav moodboards-sidebar">
@@ -1571,58 +1603,24 @@ export function ShotsPage({ project }: ShotsPageProps) {
           </section>
         ) : (
           <>
-            <section className="panel shots-toolbar">
-              <div className="shots-toolbar__row">
-                <div className="shots-toolbar__actions">
-                  <button type="button" className="pill-button" onClick={() => void createShot({ afterSelected: true })}>New shot</button>
-                  <button type="button" className="pill-button" onClick={openPlayback} disabled={!shots.length}>Play</button>
-                  <button
-                    type="button"
-                    className="pill-button"
-                    onClick={(event) => {
-                      if (event.ctrlKey && projectFilePath && activeScene) {
-                        void electron.openScenePoolPopout({
-                          projectFilePath,
-                          sceneId: activeScene.id,
-                          title: `${activeScene.name} - Pool`,
-                        });
-                        return;
-                      }
-                      void openPool();
-                    }}
-                    disabled={!activeScene}
-                  >
-                    Pool
-                  </button>
-                  <button
-                    type="button"
-                    className="pill-button"
-                    onClick={() => {
-                      void openCandidates();
-                    }}
-                    disabled={!activeScene}
-                  >
-                    Candidates
-                  </button>
-                  <button
-                    type="button"
-                    className="pill-button"
-                    disabled={!shots.length || gridExportBusy}
-                    onClick={openExportDialog}
-                  >
-                    Export
-                  </button>
-                </div>
-                <SegmentedControl
-                  className="shots-toolbar__modes"
-                  ariaLabel="Shot mode"
-                  options={modeOptions}
-                  value={displayMode}
-                  onChange={setDisplayMode}
-                />
-              </div>
-              {gridExportMessage ? <p className="muted">{gridExportMessage}</p> : null}
-            </section>
+            <ShotsToolbar
+              hasShots={shots.length > 0}
+              poolDisabled={!activeScene}
+              gridExportBusy={gridExportBusy}
+              gridExportMessage={gridExportMessage}
+              modeOptions={modeOptions}
+              displayMode={displayMode}
+              onCreateShot={() => {
+                void createShot({ afterSelected: true });
+              }}
+              onPlay={openPlayback}
+              onPool={handleToolbarPoolClick}
+              onOpenCandidates={() => {
+                void openCandidates();
+              }}
+              onOpenExport={openExportDialog}
+              onDisplayModeChange={setDisplayMode}
+            />
 
             <section className="panel">
               <div className="shots-list">
@@ -1850,59 +1848,20 @@ export function ShotsPage({ project }: ShotsPageProps) {
         cancelLabel="Cancel"
       />
 
-      {versionsOpen ? (
-        <div className="modal-backdrop" onClick={closeVersionsBrowser}>
-          <div className="modal shot-versions-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal__header">
-              <h3 className="modal__title">
-                {capitalizeMode(displayMode)} Versions
-              </h3>
-              <button type="button" className="pill-button" onClick={closeVersionsBrowser}>
-                Close
-              </button>
-            </div>
-            {modeAssetsLoading ? <p className="muted">Loading versions...</p> : null}
-            {!modeAssetsLoading && !modeAssets.length ? <p className="muted">No versions yet in this mode.</p> : null}
-            {!modeAssetsLoading && modeAssets.length ? (
-              <MediaTileGrid
-                items={versionMediaItems}
-                className="moodboard-grid shot-versions-grid"
-                getKey={(item) => item.path}
-                getTileClassName={(item) => `moodboard-tile${item.isFavorite ? " moodboard-tile--favorite" : ""}`}
-                onOpen={(_item, idx) => setPreviewIndex(idx)}
-                onContextMenu={(event, item) => openVersionMenu(event, item)}
-                renderActions={(asset) => (
-                  <div className="shot-versions-grid__actions" onClick={(event) => event.stopPropagation()}>
-                    <button
-                      type="button"
-                      className={`shot-versions-grid__icon-button${asset.isFavorite ? " shot-versions-grid__icon-button--active" : ""}`}
-                      disabled={asset.isFavorite}
-                      onClick={() => void setFavoriteForAsset(asset)}
-                      aria-label={asset.isFavorite ? "Favorite (active)" : "Set favorite"}
-                      title={asset.isFavorite ? "Favorite" : "Set favorite"}
-                    >
-                      <img
-                        src={asset.isFavorite ? "icons/favorite_active.png" : "icons/favorite_not_active.png"}
-                        alt=""
-                        aria-hidden
-                      />
-                    </button>
-                    <button
-                      type="button"
-                      className="shot-versions-grid__icon-button"
-                      onClick={() => requestDeleteAsset(asset)}
-                      aria-label="Delete version"
-                      title="Delete version"
-                    >
-                      <img src="icons/delete.png" alt="" aria-hidden />
-                    </button>
-                  </div>
-                )}
-              />
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      <ShotVersionsModal
+        open={versionsOpen}
+        displayMode={displayMode}
+        modeAssetsLoading={modeAssetsLoading}
+        modeAssets={modeAssets}
+        versionMediaItems={versionMediaItems}
+        onClose={closeVersionsBrowser}
+        onOpenPreview={(idx) => setPreviewIndex(idx)}
+        onOpenVersionMenu={(event, item) => openVersionMenu(event, item)}
+        onSetFavorite={(asset) => {
+          void setFavoriteForAsset(asset);
+        }}
+        onRequestDeleteAsset={requestDeleteAsset}
+      />
 
       {poolOpen ? (
         <div className="modal-backdrop" onClick={() => setPoolOpen(false)}>
@@ -1988,87 +1947,27 @@ export function ShotsPage({ project }: ShotsPageProps) {
         </div>
       ) : null}
 
-      {exportDialogOpen ? (
-        <div className="modal-backdrop">
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal__header">
-              <h3 className="modal__title">Export Grid</h3>
-            </div>
-            <div className="form-section">
-              <p className="muted">
-                Mode: <strong>{displayMode === "concept" ? "Concept" : displayMode === "reference" ? "Reference" : displayMode === "still" ? "Still" : "Clip (not supported)"}</strong>
-              </p>
-              <div className="export-grid-fields">
-                <label className="form-row">
-                  <span className="section-title">Columns (X)</span>
-                  <input
-                    className="form-input"
-                    type="text"
-                    inputMode="numeric"
-                    value={exportColumnsText}
-                    onChange={(event) => setExportColumnsText(event.target.value)}
-                  />
-                </label>
-                <label className="form-row">
-                  <span className="section-title">Start index:</span>
-                  <input
-                    className="form-input"
-                    type="text"
-                    inputMode="numeric"
-                    value={exportStartIndexText}
-                    onChange={(event) => setExportStartIndexText(event.target.value)}
-                  />
-                </label>
-                <label className="form-row">
-                  <span className="section-title">End index:</span>
-                  <input
-                    className="form-input"
-                    type="text"
-                    inputMode="numeric"
-                    value={exportEndIndexText}
-                    onChange={(event) => setExportEndIndexText(event.target.value)}
-                  />
-                </label>
-              </div>
-              <label className="export-grid-resize-row">
-                <input
-                  type="checkbox"
-                  checked={exportResizeEnabled}
-                  onChange={(event) => setExportResizeEnabled(event.target.checked)}
-                />
-                <span>Resize to max:</span>
-                <input
-                  className="form-input export-grid-resize-input"
-                  type="text"
-                  inputMode="numeric"
-                  value={exportMaxLongestEdgeText}
-                  onChange={(event) => setExportMaxLongestEdgeText(event.target.value)}
-                  disabled={!exportResizeEnabled}
-                />
-                <span>(longest edge)</span>
-              </label>
-              <p className="muted">
-                Tile size: {resolveProjectDimension(project.settings?.width, 1920)} x {resolveProjectDimension(project.settings?.height, 1080)}
-              </p>
-            </div>
-            <div className="modal__footer">
-              <button type="button" className="pill-button" onClick={() => setExportDialogOpen(false)} disabled={gridExportBusy}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="pill-button"
-                disabled={gridExportBusy}
-                onClick={() => {
-                  void exportSceneGrid();
-                }}
-              >
-                {gridExportBusy ? "Exporting..." : "Export"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <ExportGridDialog
+        open={exportDialogOpen}
+        displayMode={displayMode}
+        exportColumnsText={exportColumnsText}
+        exportStartIndexText={exportStartIndexText}
+        exportEndIndexText={exportEndIndexText}
+        exportResizeEnabled={exportResizeEnabled}
+        exportMaxLongestEdgeText={exportMaxLongestEdgeText}
+        tileWidth={resolveProjectDimension(project.settings?.width, 1920)}
+        tileHeight={resolveProjectDimension(project.settings?.height, 1080)}
+        gridExportBusy={gridExportBusy}
+        onChangeColumns={setExportColumnsText}
+        onChangeStartIndex={setExportStartIndexText}
+        onChangeEndIndex={setExportEndIndexText}
+        onChangeResizeEnabled={setExportResizeEnabled}
+        onChangeMaxLongestEdge={setExportMaxLongestEdgeText}
+        onCancel={() => setExportDialogOpen(false)}
+        onExport={() => {
+          void exportSceneGrid();
+        }}
+      />
 
       <MediaLightbox
         open={Boolean(previewAsset)}
@@ -2429,216 +2328,3 @@ export function ShotsPage({ project }: ShotsPageProps) {
     </div>
   );
 }
-
-function normalizeShotsIndex(index: ShotsIndex): ShotsIndex {
-  return {
-    shots: (index.shots ?? [])
-      .map((shot, idx) => {
-        const conceptAssets = normalizeAssetList(shot.conceptAssets);
-        const referenceAssets = normalizeAssetList(shot.referenceAssets);
-        const stillAssets = normalizeAssetList(shot.stillAssets);
-        const clipAssets = normalizeAssetList(shot.clipAssets);
-        const favoriteConcept = typeof shot.favoriteConcept === "string" ? shot.favoriteConcept : "";
-        const favoriteReference = typeof shot.favoriteReference === "string" ? shot.favoriteReference : "";
-        const favoriteStill = typeof shot.favoriteStill === "string" ? shot.favoriteStill : "";
-        const favoriteClip = typeof shot.favoriteClip === "string" ? shot.favoriteClip : "";
-        return {
-          id: shot.id,
-          order: typeof shot.order === "number" ? shot.order : idx,
-          description: shot.description ?? "",
-          favoriteConcept: conceptAssets.includes(favoriteConcept) ? favoriteConcept : (conceptAssets[conceptAssets.length - 1] ?? ""),
-          favoriteReference: referenceAssets.includes(favoriteReference) ? favoriteReference : (referenceAssets[referenceAssets.length - 1] ?? ""),
-          favoriteStill: stillAssets.includes(favoriteStill) ? favoriteStill : (stillAssets[stillAssets.length - 1] ?? ""),
-          favoriteClip: clipAssets.includes(favoriteClip) ? favoriteClip : (clipAssets[clipAssets.length - 1] ?? ""),
-          conceptAssets,
-          referenceAssets,
-          stillAssets,
-          clipAssets,
-          durationSeconds: typeof shot.durationSeconds === "number" && Number.isFinite(shot.durationSeconds)
-            ? shot.durationSeconds
-            : 2,
-          framing: shot.framing ?? "",
-          action: shot.action ?? "",
-          camera: shot.camera ?? "",
-        };
-      })
-      .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)),
-  };
-}
-
-function isMacPlatform(): boolean {
-  if (typeof navigator === "undefined") return false;
-  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-  const platform = (nav.userAgentData?.platform ?? navigator.platform ?? "").toLowerCase();
-  return platform.includes("mac");
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName.toLowerCase();
-  return tag === "input" || tag === "textarea" || target.isContentEditable;
-}
-
-function isWebOrDataUrl(value: string): boolean {
-  const trimmed = value.trim();
-  return /^(?:https?|data|blob):/i.test(trimmed);
-}
-
-function fileExtension(value: string): string | null {
-  const normalized = value.trim().replace(/\\/g, "/");
-  const queryIdx = normalized.indexOf("?");
-  const cleaned = queryIdx >= 0 ? normalized.slice(0, queryIdx) : normalized;
-  const slashIdx = cleaned.lastIndexOf("/");
-  const fileName = slashIdx >= 0 ? cleaned.slice(slashIdx + 1) : cleaned;
-  const dotIdx = fileName.lastIndexOf(".");
-  if (dotIdx <= 0 || dotIdx === fileName.length - 1) return null;
-  return fileName.slice(dotIdx).toLowerCase();
-}
-
-function isVideoExtension(ext: string): boolean {
-  const normalized = ext.toLowerCase().replace(/^\./, "");
-  return VIDEO_EXTENSIONS.includes(normalized as typeof VIDEO_EXTENSIONS[number]);
-}
-
-function imageExtensionFromName(value: string): string | null {
-  const ext = fileExtension(value);
-  if (!ext) return null;
-  if (ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp") return ext;
-  return null;
-}
-
-function isFileAllowedForMode(value: string, mode: ShotDisplayMode): boolean {
-  const ext = fileExtension(value);
-  if (!ext) return false;
-  if (mode === "clip") return isVideoExtension(ext);
-  return imageExtensionFromName(value) !== null;
-}
-
-function modeFolderName(mode: ShotDisplayMode): "concept" | "reference" | "still" | "clip" {
-  return mode;
-}
-
-function capitalizeMode(mode: ShotDisplayMode): string {
-  return mode.charAt(0).toUpperCase() + mode.slice(1);
-}
-
-function playbackModeLabel(mode: ShotDisplayMode): string {
-  if (mode === "concept") return "Sketch";
-  return capitalizeMode(mode);
-}
-
-function getBaseName(pathValue: string): string {
-  const normalized = pathValue.replace(/\\/g, "/");
-  const idx = normalized.lastIndexOf("/");
-  return idx === -1 ? normalized : normalized.slice(idx + 1);
-}
-
-function sanitizeFileName(value: string): string {
-  return value.replace(/[\\/:*?"<>|]+/g, "").trim();
-}
-
-function uniqueStrings(values: string[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of values) {
-    const value = raw.trim().replace(/\\/g, "/");
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    out.push(value);
-  }
-  return out;
-}
-
-function normalizeAssetList(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return uniqueStrings(value.filter((entry): entry is string => typeof entry === "string"));
-}
-
-function normalizeBoardRefs(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const entry of value) {
-    if (typeof entry !== "string") continue;
-    const cleaned = entry.trim();
-    if (!cleaned || seen.has(cleaned)) continue;
-    seen.add(cleaned);
-    out.push(cleaned);
-    if (out.length >= 5) break;
-  }
-  return out;
-}
-
-function isImageFile(name: string): boolean {
-  return imageExtensionFromName(name) !== null;
-}
-
-function resolveShotDurationMs(value: number | null | undefined): number {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    return Math.max(100, Math.round(value * 1000));
-  }
-  return 2000;
-}
-
-function formatDurationLabel(value: number | null | undefined): string {
-  const ms = resolveShotDurationMs(value);
-  return `${(ms / 1000).toFixed(2)}s`;
-}
-
-function resolveProjectDimension(value: number | null | undefined, fallback: number): number {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    return Math.max(1, Math.round(value));
-  }
-  return fallback;
-}
-
-function parsePositiveInteger(value: string): number | null {
-  const normalized = value.trim();
-  if (!normalized) return null;
-  if (!/^\d+$/.test(normalized)) return null;
-  const parsed = Number.parseInt(normalized, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return null;
-  return parsed;
-}
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-async function createWhitePng(width: number, height: number): Promise<ArrayBuffer> {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    throw new Error("Could not create 2D canvas context.");
-  }
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, height);
-
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob((result) => resolve(result), "image/png");
-  });
-  if (!blob) {
-    throw new Error("Could not encode white PNG.");
-  }
-  return blob.arrayBuffer();
-}
-
-async function uniqueFileName(dir: string, fileName: string): Promise<string> {
-  const safe = sanitizeFileName(fileName);
-  if (!safe) return `asset-${Date.now()}`;
-  const extIdx = safe.lastIndexOf(".");
-  const base = extIdx > 0 ? safe.slice(0, extIdx) : safe;
-  const ext = extIdx > 0 ? safe.slice(extIdx) : "";
-  let candidate = safe;
-  let counter = 1;
-  while (await window.electronAPI.exists(joinPath(dir, candidate))) {
-    candidate = `${base}-${counter}${ext}`;
-    counter += 1;
-  }
-  return candidate;
-}
-
-const SHOT_MODES: ShotDisplayMode[] = ["concept", "reference", "still", "clip"];
