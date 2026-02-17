@@ -7,11 +7,8 @@
  * 1) the immutable token (identity)
  * 2) the human-readable slug (renameable)
  *
- * Canonical new format:
+ * Canonical format:
  *   scene-<slug>-<token>
- *
- * Legacy format (must remain supported):
- *   scene-<token>
  *
  * Parsing rule:
  *   Parse from RIGHT to LEFT for the token.
@@ -30,20 +27,16 @@
 export interface ParsedSceneId {
   raw: string;
   token: string;
-  slug: string | null;
-  isLegacy: boolean;
+  slug: string;
 }
 
 const SCENE_PREFIX = "scene-";
 const TOKEN_RE = /^[a-zA-Z0-9]+$/;
-const LEGACY_TOKEN_RE = /^[a-zA-Z0-9-]+$/;
 const NAME_PART_RE = /^[a-z0-9_]+$/;
 
 /**
- * Parses scene IDs in both supported forms:
- * - scene-<token> (legacy token may include dashes, e.g. UUID)
+ * Parses canonical scene IDs:
  * - scene-<slug>-<token>
- *
  * Token extraction is right-to-left.
  * Throws on invalid IDs.
  */
@@ -58,30 +51,18 @@ export function parseSceneId(raw: string): ParsedSceneId {
     throw new Error(`Scene ID is missing token. Received: "${value}"`);
   }
 
-  // RIGHT-TO-LEFT parse for canonical IDs:
-  // - scene-<slug>-<token> where slug has no dashes and token is [a-zA-Z0-9]+.
-  // Fallback for legacy IDs:
-  // - If canonical split is not valid, treat entire remainder as legacy token.
-  //   This preserves existing UUID-style IDs: scene-52d8e...-... .
   const lastDash = remainder.lastIndexOf("-");
-  if (lastDash !== -1) {
-    const canonicalToken = remainder.slice(lastDash + 1);
-    const canonicalSlug = remainder.slice(0, lastDash);
-    if (canonicalSlug && NAME_PART_RE.test(canonicalSlug) && TOKEN_RE.test(canonicalToken)) {
-      return {
-        raw: value,
-        token: canonicalToken,
-        slug: canonicalSlug,
-        isLegacy: false,
-      };
-    }
+  if (lastDash === -1) {
+    throw new Error(`Scene ID must be canonical "scene-<slug>-<token>". Received: "${value}"`);
   }
 
-  // Legacy path: whole remainder is treated as token.
-  const token = remainder;
-  const slug = null;
+  const token = remainder.slice(lastDash + 1);
+  const slug = remainder.slice(0, lastDash);
 
-  if (!token || !LEGACY_TOKEN_RE.test(token)) {
+  if (!slug || !NAME_PART_RE.test(slug)) {
+    throw new Error(`Invalid scene slug "${slug}" in "${value}".`);
+  }
+  if (!token || !TOKEN_RE.test(token)) {
     throw new Error(`Invalid scene token "${token}" in "${value}".`);
   }
 
@@ -89,7 +70,6 @@ export function parseSceneId(raw: string): ParsedSceneId {
     raw: value,
     token,
     slug,
-    isLegacy: true,
   };
 }
 
@@ -120,10 +100,6 @@ export function normalizeSceneNamePart(name: string): string {
  * Builds a canonical ID.
  *
  * - If namePart is provided, returns: scene-<normalizedNamePart>-<token>
- * - If namePart is empty/undefined, returns legacy-compatible: scene-<token>
- *
- * NOTE:
- * Prefer passing a namePart for new IDs to keep folders human-readable.
  */
 export function buildSceneId(token: string, namePart?: string): string {
   const cleanToken = String(token ?? "").trim();
@@ -133,7 +109,7 @@ export function buildSceneId(token: string, namePart?: string): string {
 
   const cleanName = namePart ? normalizeSceneNamePart(namePart) : "";
   if (!cleanName) {
-    return `${SCENE_PREFIX}${cleanToken}`;
+    throw new Error("Scene name part is required for canonical scene ID.");
   }
   return `${SCENE_PREFIX}${cleanName}-${cleanToken}`;
 }
@@ -148,7 +124,7 @@ export function buildSceneId(token: string, namePart?: string): string {
  */
 export function renameSceneIdPreservingToken(currentId: string, newNamePart: string): string {
   const parsed = parseSceneId(currentId);
-  return buildSceneId(canonicalizeSceneToken(parsed.token), newNamePart);
+  return buildSceneId(parsed.token, newNamePart);
 }
 
 /**
@@ -162,22 +138,4 @@ export function isValidSceneId(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * Converts legacy tokens (e.g. UUID with dashes) into canonical token format.
- *
- * Identity is preserved semantically (same underlying token characters),
- * while making the token compatible with canonical scene ID format.
- */
-function canonicalizeSceneToken(token: string): string {
-  const clean = String(token ?? "").trim();
-  if (TOKEN_RE.test(clean)) {
-    return clean;
-  }
-  const compact = clean.replace(/[^a-zA-Z0-9]+/g, "");
-  if (TOKEN_RE.test(compact)) {
-    return compact;
-  }
-  throw new Error(`Cannot canonicalize scene token "${token}" to canonical format.`);
 }

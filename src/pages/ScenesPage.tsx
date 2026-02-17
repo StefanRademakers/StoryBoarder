@@ -7,7 +7,7 @@ import { MdxTextSection } from "../components/common/MdxTextSection";
 import { useAppState } from "../state/appState";
 import { ImageAssetField } from "../components/common/ImageAssetField";
 import { useEscapeKey } from "../hooks/useEscapeKey";
-import { buildSceneId, isValidSceneId, renameSceneIdPreservingToken } from "../utils/sceneId";
+import { buildSceneId, parseSceneId, renameSceneIdPreservingToken } from "../utils/sceneId";
 
 interface ScenesPageProps {
   project: ProjectState;
@@ -134,20 +134,6 @@ export function ScenesPage({ project }: ScenesPageProps) {
       const parsed = JSON.parse(text) as ScenesIndex;
       const normalizedResult = normalizeLoadedScenes(parsed.scenes ?? []);
 
-      if (normalizedResult.idCopies.length) {
-        for (const copy of normalizedResult.idCopies) {
-          const fromDir = joinPath(scenesRoot, copy.fromId);
-          const toDir = joinPath(scenesRoot, copy.toId);
-          const [fromExists, toExists] = await Promise.all([
-            electron.exists(fromDir),
-            electron.exists(toDir),
-          ]);
-          if (fromExists && !toExists) {
-            await electron.copyDir(fromDir, toDir);
-          }
-        }
-      }
-
       if (seq !== loadSeqRef.current) return;
 
       const normalized: ScenesIndex = {
@@ -226,6 +212,9 @@ export function ScenesPage({ project }: ScenesPageProps) {
     const nextName = nextNameRaw.trim();
     if (!nextName) {
       throw new Error("Scene name cannot be empty.");
+    }
+    if (nextName.includes("-")) {
+      throw new Error('Scene name cannot contain "-".');
     }
 
     const current = indexRef.current;
@@ -575,6 +564,10 @@ function SceneEditor({
       setRenameError("Scene name cannot be empty.");
       return;
     }
+    if (next.includes("-")) {
+      setRenameError('Scene name cannot contain "-".');
+      return;
+    }
     if (next === scene.name) {
       setRenameOpen(false);
       setRenameError(null);
@@ -862,22 +855,27 @@ function normalizeSceneOrder(scenes: SceneMeta[]): SceneMeta[] {
 function normalizeLoadedScenes(input: SceneMeta[]): {
   scenes: SceneMeta[];
   didNormalize: boolean;
-  idCopies: Array<{ fromId: string; toId: string }>;
 } {
   const usedIds = new Set<string>();
-  const idCopies: Array<{ fromId: string; toId: string }> = [];
   let didNormalize = false;
 
   const normalized = input.map((scene, idx) => {
     const originalId = String(scene.id ?? "").trim();
     let id = originalId;
 
-    if (!id || !isValidSceneId(id) || usedIds.has(id)) {
+    if (!id) {
+      throw new Error(`Scene at index ${idx} is missing an id.`);
+    }
+
+    try {
+      parseSceneId(id);
+    } catch (error) {
+      throw new Error(`Invalid scene id "${id}": ${toErrorMessage(error)}`);
+    }
+
+    if (usedIds.has(id)) {
       id = makeSceneId(scene.name);
       didNormalize = true;
-      if (originalId) {
-        idCopies.push({ fromId: originalId, toId: id });
-      }
     }
 
     usedIds.add(id);
@@ -915,7 +913,6 @@ function normalizeLoadedScenes(input: SceneMeta[]): {
   return {
     scenes: normalized,
     didNormalize,
-    idCopies,
   };
 }
 
