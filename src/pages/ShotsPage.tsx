@@ -1,44 +1,50 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectState } from "../state/types";
 import { electron } from "../services/electron";
-import { joinPath, toFileUrl } from "../utils/path";
-import { DropOrBrowse } from "../components/common/DropOrBrowse";
+import { joinPath } from "../utils/path";
 import { ConfirmDialog } from "../components/common/ConfirmDialog";
-import { extractPathsFromDrop, handleDragOver } from "../utils/dnd";
 import { useAppState } from "../state/appState";
-import { MediaContextMenu } from "../components/common/MediaContextMenu";
-import { MediaLightbox } from "../components/common/MediaLightbox";
-import { MediaTileGrid } from "../components/common/MediaTileGrid";
 import { inferMediaKind, type MediaItem } from "../components/common/mediaTypes";
-import { SegmentedControl, type SegmentedControlOption } from "../components/common/SegmentedControl";
+import type { SegmentedControlOption } from "../components/common/SegmentedControl";
 import { useEscapeKey } from "../hooks/useEscapeKey";
+import { CandidatesModal } from "./shots/CandidatesModal";
 import { ExportGridDialog } from "./shots/ExportGridDialog";
+import { ScenePoolModal } from "./shots/ScenePoolModal";
+import { ShotsContextMenus } from "./shots/ShotsContextMenus";
+import { ShotsLightboxes } from "./shots/ShotsLightboxes";
+import { ShotsList } from "./shots/ShotsList";
+import { ShotsPlaybackOverlay } from "./shots/ShotsPlaybackOverlay";
 import { ShotsToolbar } from "./shots/ShotsToolbar";
 import { ShotVersionsModal } from "./shots/ShotVersionsModal";
-import type { ShotDisplayMode, ShotModeAsset } from "./shots/types";
+import {
+  copyMediaIntoShotMode,
+  ensureShotsIndexExists,
+  importCandidatePaths as importCandidatePathsToRepo,
+  listCandidateAssets,
+  listScenePoolAssets,
+  loadScenesIndex,
+  persistShotsIndex,
+  readShotsForScene,
+  shotsDirForScene,
+} from "./shots/shotsRepository";
+import type { CandidateAsset, CandidateTab, InlineFullscreenAsset, ScenePoolAsset, ShotDisplayMode, ShotModeAsset } from "./shots/types";
+import { useShotsCrud } from "./shots/useShotsCrud";
+import { useShotPlayback } from "./shots/useShotPlayback";
+import { useShotsExport } from "./shots/useShotsExport";
 import {
   VIDEO_EXTENSIONS,
   SHOT_MODES,
   capitalizeMode,
   createWhitePng,
-  fileExtension,
-  formatDurationLabel,
   getBaseName,
   imageExtensionFromName,
   isEditableTarget,
   isFileAllowedForMode,
-  isImageFile,
   isMacPlatform,
   isWebOrDataUrl,
   modeFolderName,
-  normalizeBoardRefs,
   normalizeShotsIndex,
-  parsePositiveInteger,
-  playbackModeLabel,
   resolveProjectDimension,
-  resolveShotDurationMs,
-  sanitizeFileName,
-  toErrorMessage,
   uniqueFileName,
   uniqueStrings,
 } from "./shots/utils";
@@ -82,34 +88,6 @@ interface ShotsIndex {
   shots: ShotItem[];
 }
 
-type CandidateTab = "stills" | "clips";
-type PlaybackMediaKind = "video" | "image" | "placeholder";
-
-interface ScenePoolAsset {
-  name: string;
-  path: string;
-  source: string;
-  mtimeMs: number;
-}
-
-interface CandidateAsset {
-  name: string;
-  path: string;
-  mtimeMs: number;
-}
-
-interface PlaybackMedia {
-  kind: PlaybackMediaKind;
-  path: string;
-  sourceMode: ShotDisplayMode | null;
-}
-
-interface InlineFullscreenAsset {
-  path: string;
-  name: string;
-  isVideo: boolean;
-}
-
 const EMPTY_SCENES: ScenesIndex = { scenes: [] };
 const EMPTY_SHOTS: ShotsIndex = { shots: [] };
 const VersionsIcon = (
@@ -147,8 +125,6 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [assetDeleteOpen, setAssetDeleteOpen] = useState(false);
   const [assetDeleteTarget, setAssetDeleteTarget] = useState<ShotModeAsset | null>(null);
-  const [playbackOpen, setPlaybackOpen] = useState(false);
-  const [playbackIndex, setPlaybackIndex] = useState(0);
   const [inlineFullscreenAsset, setInlineFullscreenAsset] = useState<InlineFullscreenAsset | null>(null);
   const [poolOpen, setPoolOpen] = useState(false);
   const [poolLoading, setPoolLoading] = useState(false);
@@ -163,16 +139,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const [candidatePreviewIndex, setCandidatePreviewIndex] = useState<number | null>(null);
   const [candidateMenuAsset, setCandidateMenuAsset] = useState<CandidateAsset | null>(null);
   const [candidateMenuPos, setCandidateMenuPos] = useState<{ x: number; y: number } | null>(null);
-  const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [exportColumnsText, setExportColumnsText] = useState("2");
-  const [exportStartIndexText, setExportStartIndexText] = useState("1");
-  const [exportEndIndexText, setExportEndIndexText] = useState("1");
-  const [exportResizeEnabled, setExportResizeEnabled] = useState(false);
-  const [exportMaxLongestEdgeText, setExportMaxLongestEdgeText] = useState("2024");
-  const [gridExportBusy, setGridExportBusy] = useState(false);
-  const [gridExportMessage, setGridExportMessage] = useState<string | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const playbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shotItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const scenesRef = useRef<SceneMeta[]>([]);
   const shotsRef = useRef<ShotItem[]>([]);
@@ -195,7 +162,6 @@ export function ShotsPage({ project }: ShotsPageProps) {
   );
 
   const activeShot = useMemo(() => shots.find((s) => s.id === activeShotId) ?? null, [shots, activeShotId]);
-  const playbackShot = playbackOpen ? shots[playbackIndex] ?? null : null;
   const previewAsset = previewIndex === null ? null : modeAssets[previewIndex] ?? null;
   const poolPreviewAsset = poolPreviewIndex === null ? null : poolAssets[poolPreviewIndex] ?? null;
   const candidatePreviewAsset = candidatePreviewIndex === null ? null : candidateAssets[candidatePreviewIndex] ?? null;
@@ -213,6 +179,8 @@ export function ShotsPage({ project }: ShotsPageProps) {
   );
 
   const sceneDir = activeScene ? joinPath(scenesRoot, activeScene.id) : null;
+  const projectWidth = resolveProjectDimension(project.settings?.width, 1920);
+  const projectHeight = resolveProjectDimension(project.settings?.height, 1080);
   const modeOptions: Array<SegmentedControlOption<ShotDisplayMode>> = [
     {
       value: "concept",
@@ -319,12 +287,14 @@ export function ShotsPage({ project }: ShotsPageProps) {
     return { ...shot, stillAssets: cleaned };
   };
 
+  const normalizeUnknownShots = (index: unknown) => normalizeShotsIndex(index as ShotsIndex);
+
   const listModeAssets = async (
     sceneId: string,
     shot: ShotItem,
     mode: ShotDisplayMode,
   ): Promise<ShotModeAsset[]> => {
-    const modeDir = joinPath(joinPath(shotsDirForScene(sceneId), shot.id), modeFolderName(mode));
+    const modeDir = joinPath(joinPath(shotsDirForScene(scenesRoot, sceneId), shot.id), modeFolderName(mode));
     await electron.ensureDir(modeDir);
     const expectedPrefix = `shots/${shot.id}/${modeFolderName(mode)}/`;
     const rows: ShotModeAsset[] = [];
@@ -410,71 +380,20 @@ export function ShotsPage({ project }: ShotsPageProps) {
       clearTimeout(persistTimerRef.current);
       persistTimerRef.current = null;
     }
-    if (playbackTimerRef.current) {
-      clearTimeout(playbackTimerRef.current);
-      playbackTimerRef.current = null;
-    }
   }, []);
 
   const loadScenes = async () => {
-    await electron.ensureDir(scenesRoot);
-    const exists = await electron.exists(scenesIndexPath);
-    if (!exists) {
+    const normalized = await loadScenesIndex(scenesRoot, scenesIndexPath);
+    if (!normalized.scenes.length) {
       setScenesIndex(EMPTY_SCENES);
       setActiveSceneId(null);
       return;
     }
-
-    try {
-      const text = await electron.readText(scenesIndexPath);
-      const parsed = JSON.parse(text) as ScenesIndex;
-      const normalized: ScenesIndex = {
-        scenes: (parsed.scenes ?? []).map((scene, idx) => ({
-          id: scene.id,
-          name: scene.name || `Scene ${String(idx + 1).padStart(2, "0")}`,
-          order: typeof scene.order === "number" ? scene.order : idx,
-          active: scene.active !== false,
-          characterPropBoards: normalizeBoardRefs(scene.characterPropBoards),
-          moodboards: normalizeBoardRefs(scene.moodboards),
-        })),
-      };
-      setScenesIndex(normalized);
-      setActiveSceneId((prev) => {
-        if (prev && normalized.scenes.some((scene) => scene.id === prev)) return prev;
-        return normalized.scenes[0]?.id ?? null;
-      });
-    } catch {
-      setScenesIndex(EMPTY_SCENES);
-      setActiveSceneId(null);
-    }
-  };
-
-  const shotsIndexPathForScene = (sceneId: string) => joinPath(joinPath(scenesRoot, sceneId), "shots.json");
-
-  const shotsDirForScene = (sceneId: string) => joinPath(joinPath(scenesRoot, sceneId), "shots");
-
-  const readShotsForScene = async (sceneId: string): Promise<ShotItem[]> => {
-    const shotsIndexPath = shotsIndexPathForScene(sceneId);
-    const exists = await electron.exists(shotsIndexPath);
-    if (!exists) {
-      return [];
-    }
-    try {
-      const text = await electron.readText(shotsIndexPath);
-      const parsed = JSON.parse(text) as ShotsIndex;
-      return normalizeShotsIndex(parsed).shots;
-    } catch {
-      return [];
-    }
-  };
-
-  const persistShotsIndex = async (sceneId: string, next: ShotsIndex) => {
-    const normalized: ShotsIndex = {
-      shots: [...next.shots]
-        .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
-        .map((shot, idx) => ({ ...shot, order: idx })),
-    };
-    await electron.writeText(shotsIndexPathForScene(sceneId), JSON.stringify(normalized, null, 2));
+    setScenesIndex(normalized);
+    setActiveSceneId((prev) => {
+      if (prev && normalized.scenes.some((scene) => scene.id === prev)) return prev;
+      return normalized.scenes[0]?.id ?? null;
+    });
   };
 
   const loadShots = async (sceneId: string | null) => {
@@ -484,23 +403,17 @@ export function ShotsPage({ project }: ShotsPageProps) {
       return;
     }
 
-    const scenePath = joinPath(scenesRoot, sceneId);
-    await electron.ensureDir(scenePath);
-    await electron.ensureDir(shotsDirForScene(sceneId));
-
-    const shotsIndexPath = shotsIndexPathForScene(sceneId);
-    const exists = await electron.exists(shotsIndexPath);
+    const exists = await ensureShotsIndexExists(scenesRoot, sceneId, EMPTY_SHOTS);
     if (!exists) {
-      await electron.writeText(shotsIndexPath, JSON.stringify(EMPTY_SHOTS, null, 2));
       setShotsIndex(EMPTY_SHOTS);
       setActiveShotId(null);
       return;
     }
 
     try {
-      const text = await electron.readText(shotsIndexPath);
-      const parsed = JSON.parse(text) as ShotsIndex;
-      const normalized = normalizeShotsIndex(parsed);
+      const normalized = {
+        shots: await readShotsForScene(scenesRoot, sceneId, normalizeUnknownShots),
+      };
       const repaired = await cleanMediaStateForScene(sceneId, normalized.shots);
       const nextIndex: ShotsIndex = { shots: repaired.shots };
       setShotsIndex(nextIndex);
@@ -509,7 +422,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
         return nextIndex.shots[0]?.id ?? null;
       });
       if (repaired.changed) {
-        await persistShotsIndex(sceneId, nextIndex);
+        await persistShotsIndex(scenesRoot, sceneId, nextIndex);
       }
     } catch {
       setShotsIndex(EMPTY_SHOTS);
@@ -525,7 +438,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
         clearTimeout(persistTimerRef.current);
         persistTimerRef.current = null;
       }
-      await persistShotsIndex(activeSceneId, next);
+      await persistShotsIndex(scenesRoot, activeSceneId, next);
       return;
     }
     if (persistTimerRef.current) {
@@ -533,7 +446,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
     }
     persistTimerRef.current = setTimeout(() => {
       persistTimerRef.current = null;
-      void persistShotsIndex(activeSceneId, next);
+      void persistShotsIndex(scenesRoot, activeSceneId, next);
     }, 350);
   };
 
@@ -667,7 +580,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
       const currentScene = orderedScenes[currentSceneIdx];
       const currentShotList = currentScene.id === activeSceneIdRef.current
         ? shotsRef.current
-        : await readShotsForScene(currentScene.id);
+        : await readShotsForScene(scenesRoot, currentScene.id, normalizeUnknownShots);
 
       const currentShotId = activeShotIdRef.current;
       const currentShotIdx = currentShotList.findIndex((shot) => shot.id === currentShotId);
@@ -684,7 +597,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
         for (let idx = currentSceneIdx + 1; idx < orderedScenes.length; idx += 1) {
           const scene = orderedScenes[idx];
-          const sceneShots = await readShotsForScene(scene.id);
+          const sceneShots = await readShotsForScene(scenesRoot, scene.id, normalizeUnknownShots);
           if (!sceneShots.length) continue;
           setActiveShotId(sceneShots[0].id);
           setActiveSceneId(scene.id);
@@ -704,7 +617,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
       for (let idx = currentSceneIdx - 1; idx >= 0; idx -= 1) {
         const scene = orderedScenes[idx];
-        const sceneShots = await readShotsForScene(scene.id);
+        const sceneShots = await readShotsForScene(scenesRoot, scene.id, normalizeUnknownShots);
         if (!sceneShots.length) continue;
         setActiveShotId(sceneShots[sceneShots.length - 1].id);
         setActiveSceneId(scene.id);
@@ -713,6 +626,26 @@ export function ShotsPage({ project }: ShotsPageProps) {
     } finally {
       navigatingRef.current = false;
     }
+  };
+
+  const createShot = async (options?: { afterSelected?: boolean }) => {
+    await createShotCrud(() => ({
+      id: `shot-${Date.now()}`,
+      order: 0,
+      description: "",
+      favoriteConcept: "",
+      favoriteReference: "",
+      favoriteStill: "",
+      favoriteClip: "",
+      conceptAssets: [],
+      referenceAssets: [],
+      stillAssets: [],
+      clipAssets: [],
+      durationSeconds: 2,
+      framing: "",
+      action: "",
+      camera: "",
+    }), options);
   };
 
   useEffect(() => {
@@ -765,78 +698,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [scenesRoot]);
-
-  const createShot = async (options?: { afterSelected?: boolean }) => {
-    const sceneId = activeSceneIdRef.current;
-    if (!sceneId) return;
-    const id = `shot-${Date.now()}`;
-    const shot: ShotItem = {
-      id,
-      order: 0,
-      description: "",
-      favoriteConcept: "",
-      favoriteReference: "",
-      favoriteStill: "",
-      favoriteClip: "",
-      conceptAssets: [],
-      referenceAssets: [],
-      stillAssets: [],
-      clipAssets: [],
-      durationSeconds: 2,
-      framing: "",
-      action: "",
-      camera: "",
-    };
-
-    const ordered = [...shotsRef.current];
-    let insertAt = ordered.length;
-    if (options?.afterSelected) {
-      const selectedId = activeShotIdRef.current;
-      if (selectedId) {
-        const selectedIdx = ordered.findIndex((item) => item.id === selectedId);
-        if (selectedIdx >= 0) {
-          insertAt = selectedIdx + 1;
-        }
-      }
-    }
-    ordered.splice(insertAt, 0, shot);
-
-    const next: ShotsIndex = {
-      shots: ordered.map((item, order) => ({ ...item, order })),
-    };
-
-    const shotDir = joinPath(shotsDirForScene(sceneId), id);
-    await electron.ensureDir(shotDir);
-    await Promise.all(
-      SHOT_MODES.map((mode) => electron.ensureDir(joinPath(shotDir, modeFolderName(mode)))),
-    );
-
-    if (persistTimerRef.current) {
-      clearTimeout(persistTimerRef.current);
-      persistTimerRef.current = null;
-    }
-    shotsRef.current = next.shots;
-    setShotsIndex(next);
-    activeShotIdRef.current = id;
-    setActiveShotId(id);
-    await persistShotsIndex(sceneId, next);
-  };
-
-  const moveShot = async (shotId: string, direction: -1 | 1) => {
-    const sorted = [...shots];
-    const idx = sorted.findIndex((shot) => shot.id === shotId);
-    if (idx < 0) return;
-    const targetIdx = idx + direction;
-    if (targetIdx < 0 || targetIdx >= sorted.length) return;
-    const temp = sorted[idx];
-    sorted[idx] = sorted[targetIdx];
-    sorted[targetIdx] = temp;
-    const reordered: ShotsIndex = {
-      shots: sorted.map((shot, order) => ({ ...shot, order })),
-    };
-    await saveShotsState(reordered, { immediate: true });
-  };
+  }, [createShot, navigateShotTimeline]);
 
   const requestDeleteShot = (shot: ShotItem) => {
     setConfirmTarget(shot);
@@ -844,30 +706,10 @@ export function ShotsPage({ project }: ShotsPageProps) {
   };
 
   const confirmDeleteShot = async () => {
-    if (!confirmTarget || !activeSceneId) return;
-    const next: ShotsIndex = {
-      shots: shotsIndex.shots.filter((shot) => shot.id !== confirmTarget.id),
-    };
-    const shotDir = joinPath(shotsDirForScene(activeSceneId), confirmTarget.id);
-    await electron.deleteDir(shotDir);
-    await saveShotsState(next, { immediate: true });
-    setActiveShotId((prev) => (prev === confirmTarget.id ? next.shots[0]?.id ?? null : prev));
+    if (!confirmTarget) return;
+    await deleteShot(confirmTarget.id);
     setConfirmOpen(false);
     setConfirmTarget(null);
-  };
-
-  const updateDescription = async (shotId: string, description: string) => {
-    const next: ShotsIndex = {
-      shots: shotsIndex.shots.map((shot) => (shot.id === shotId ? { ...shot, description } : shot)),
-    };
-    await saveShotsState(next);
-  };
-
-  const updateShot = async (shotId: string, updater: (shot: ShotItem) => ShotItem) => {
-    const next: ShotsIndex = {
-      shots: shotsIndex.shots.map((shot) => (shot.id === shotId ? updater(shot) : shot)),
-    };
-    await saveShotsState(next);
   };
 
   const updateShotMedia = async (
@@ -878,32 +720,20 @@ export function ShotsPage({ project }: ShotsPageProps) {
     const shotId = options?.shotId ?? activeShotIdRef.current;
     const mode = options?.mode ?? displayModeRef.current;
     if (!sceneId || !shotId || !paths.length) return;
-    const shotModeDir = joinPath(joinPath(shotsDirForScene(sceneId), shotId), modeFolderName(mode));
-    await electron.ensureDir(shotModeDir);
-
     const accepted = paths.filter((input) => {
       if (isWebOrDataUrl(input)) return false;
       return true;
     });
     if (!accepted.length) return;
 
-    const copiedRelatives: string[] = [];
-    for (const input of accepted) {
-      const sourceExists = await electron.exists(input);
-      if (!sourceExists) {
-        continue;
-      }
-      const ext = fileExtension(input);
-      if (!ext || !isFileAllowedForMode(input, mode)) {
-        continue;
-      }
-      const sourceName = sanitizeFileName(getBaseName(input));
-      if (!sourceName) continue;
-      const uniqueName = await uniqueFileName(shotModeDir, sourceName);
-      const target = joinPath(shotModeDir, uniqueName);
-      await electron.copyFile(input, target);
-      copiedRelatives.push(`shots/${shotId}/${modeFolderName(mode)}/${uniqueName}`);
-    }
+    const copiedRelatives = await copyMediaIntoShotMode(
+      scenesRoot,
+      sceneId,
+      shotId,
+      modeFolderName(mode),
+      accepted,
+      (value) => isFileAllowedForMode(value, mode),
+    );
     if (!copiedRelatives.length) return;
 
     const newestRelative = copiedRelatives[copiedRelatives.length - 1];
@@ -943,15 +773,6 @@ export function ShotsPage({ project }: ShotsPageProps) {
     }
   };
 
-  const closePlayback = () => {
-    if (playbackTimerRef.current) {
-      clearTimeout(playbackTimerRef.current);
-      playbackTimerRef.current = null;
-    }
-    setPlaybackOpen(false);
-    setPlaybackIndex(0);
-  };
-
   const openInlineFullscreen = (shot: ShotItem) => {
     const path = shotAssetPath(shot);
     if (!path) return;
@@ -964,42 +785,8 @@ export function ShotsPage({ project }: ShotsPageProps) {
   };
 
   const loadScenePoolAssets = async (scene: SceneMeta) => {
-    const refs: Array<{ rootFolder: "characters" | "moodboards"; boardName: string }> = [];
-    for (const boardName of normalizeBoardRefs(scene.characterPropBoards)) {
-      refs.push({ rootFolder: "characters", boardName });
-    }
-    for (const boardName of normalizeBoardRefs(scene.moodboards)) {
-      refs.push({ rootFolder: "moodboards", boardName });
-    }
-
-    const rows: ScenePoolAsset[] = [];
-    for (const ref of refs) {
-      const boardDir = joinPath(joinPath(project.paths.root, ref.rootFolder), ref.boardName);
-      const exists = await electron.exists(boardDir);
-      if (!exists) continue;
-      const entries = await electron.listDir(boardDir);
-      for (const entry of entries) {
-        if (!entry.isFile) continue;
-        if (!isImageFile(entry.name)) continue;
-        const filePath = joinPath(boardDir, entry.name);
-        const stat = await electron.stat(filePath);
-        rows.push({
-          name: entry.name,
-          path: filePath,
-          source: `${ref.rootFolder}/${ref.boardName}`,
-          mtimeMs: stat?.mtimeMs ?? 0,
-        });
-      }
-    }
-
-    rows.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
-    const unique = new Map<string, ScenePoolAsset>();
-    for (const row of rows) {
-      if (!unique.has(row.path)) {
-        unique.set(row.path, row);
-      }
-    }
-    setPoolAssets(Array.from(unique.values()));
+    const rows = await listScenePoolAssets(project.paths.root, scene);
+    setPoolAssets(rows);
   };
 
   const openPool = async () => {
@@ -1026,30 +813,8 @@ export function ShotsPage({ project }: ShotsPageProps) {
     setPoolMenuPos({ x: event.clientX, y: event.clientY });
   };
 
-  const candidateFolderName = (tab: CandidateTab): "CandidateStills" | "CandidateClips" => (
-    tab === "stills" ? "CandidateStills" : "CandidateClips"
-  );
-
-  const candidateDirForScene = (sceneId: string, tab: CandidateTab) => (
-    joinPath(joinPath(scenesRoot, sceneId), candidateFolderName(tab))
-  );
-
   const loadCandidateAssets = async (sceneId: string, tab: CandidateTab) => {
-    const dir = candidateDirForScene(sceneId, tab);
-    await electron.ensureDir(dir);
-    const entries = await electron.listDir(dir);
-    const rows: CandidateAsset[] = [];
-    for (const entry of entries) {
-      if (!entry.isFile) continue;
-      const path = joinPath(dir, entry.name);
-      const stat = await electron.stat(path);
-      rows.push({
-        name: entry.name,
-        path,
-        mtimeMs: stat?.mtimeMs ?? 0,
-      });
-    }
-    rows.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
+    const rows = await listCandidateAssets(scenesRoot, sceneId, tab);
     setCandidateAssets(rows);
   };
 
@@ -1065,20 +830,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
   const importCandidatePaths = async (paths: string[]) => {
     if (!activeScene || !paths.length) return;
-    const targetDir = candidateDirForScene(activeScene.id, candidateTab);
-    await electron.ensureDir(targetDir);
-
-    for (const inputPath of paths) {
-      try {
-        const base = getBaseName(inputPath);
-        const fileName = await uniqueFileName(targetDir, base);
-        const destination = joinPath(targetDir, fileName);
-        await electron.copyFile(inputPath, destination);
-      } catch {
-        // Skip non-file entries or copy failures and continue with remaining paths.
-      }
-    }
-
+    await importCandidatePathsToRepo(scenesRoot, activeScene.id, candidateTab, paths);
     await refreshCandidateAssets();
   };
 
@@ -1111,113 +863,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
     setImageMenuPos(null);
     setAssetDeleteOpen(false);
     setAssetDeleteTarget(null);
-    setPlaybackIndex(0);
-    setPlaybackOpen(true);
-  };
-
-  const stepPlayback = (direction: -1 | 1) => {
-    setPlaybackIndex((current) => {
-      if (direction > 0) {
-        if (current >= shots.length - 1) {
-          closePlayback();
-          return current;
-        }
-        return current + 1;
-      }
-      return Math.max(0, current - 1);
-    });
-  };
-
-  const exportSceneGrid = async () => {
-    if (!activeScene || !shots.length || gridExportBusy) return;
-    if (displayMode === "clip") {
-      setGridExportMessage("Export is only available in Concept, Reference, or Still mode.");
-      return;
-    }
-    const mode: "concept" | "reference" | "still" = displayMode;
-
-    const columnsRaw = parsePositiveInteger(exportColumnsText);
-    const columns = Math.max(1, Math.min(24, columnsRaw ?? 2));
-    const totalShots = shots.length;
-    const startRaw = parsePositiveInteger(exportStartIndexText);
-    const endRaw = parsePositiveInteger(exportEndIndexText);
-    const startIndex = Math.max(1, Math.min(totalShots, startRaw ?? 1));
-    const endIndex = Math.max(startIndex, Math.min(totalShots, endRaw ?? totalShots));
-    const exportShots = shots.slice(startIndex - 1, endIndex);
-    if (!exportShots.length) {
-      setGridExportMessage("No shots in selected range.");
-      return;
-    }
-    const maxLongestEdge = parsePositiveInteger(exportMaxLongestEdgeText) ?? 2024;
-    const width = resolveProjectDimension(project.settings?.width, 1920);
-    const height = resolveProjectDimension(project.settings?.height, 1080);
-    const modeName = mode === "concept" ? "concept_board" : mode === "reference" ? "reference_board" : "still_board";
-    const defaultName = `${modeName}_${activeScene.name.replace(/[\\/:*?"<>|]+/g, "_")}.png`;
-    const pickedFile = await electron.pickSaveFile({
-      title: "Save grid export",
-      defaultPath: joinPath(joinPath(scenesRoot, activeScene.id), defaultName),
-      filters: [{ name: "PNG Image", extensions: ["png"] }],
-    });
-    if (!pickedFile) return;
-    const items = exportShots.map((shot, idx) => {
-      const absolute = shotAssetPath(shot, mode);
-      const shotNumber = startIndex + idx;
-      return {
-        path: absolute,
-        label: `SHOT ${String(shotNumber).padStart(3, "0")}`,
-      };
-    });
-
-    setGridExportBusy(true);
-    setGridExportMessage(null);
-    try {
-      const expectedOutputPath = pickedFile.toLowerCase().endsWith(".png") ? pickedFile : `${pickedFile}.png`;
-      const response = await electron.runPythonCommand(
-        "create_image_grid",
-        {
-          paths: [],
-          data: {
-            items,
-            xTiles: columns,
-            tileWidth: width,
-            tileHeight: height,
-            fitMode: "contain",
-            padding: 24,
-            addLabels: true,
-            textColor: "#ffffff",
-            backgroundColor: "#ffffff",
-            resizeToMaxLongestEdge: exportResizeEnabled,
-            maxLongestEdge,
-            outputPath: pickedFile,
-          },
-        },
-        { timeoutMs: 120000 },
-      );
-      if (!response.ok) {
-        setGridExportMessage(`Export failed: ${response.error.message}`);
-        return;
-      }
-      const message = typeof response.data?.message === "string"
-        ? response.data.message
-        : "Grid export completed.";
-      setGridExportMessage(message);
-      await electron.revealInFileManager(expectedOutputPath);
-      setExportDialogOpen(false);
-    } catch (error) {
-      setGridExportMessage(`Export failed: ${toErrorMessage(error)}`);
-    } finally {
-      setGridExportBusy(false);
-    }
-  };
-
-  const openExportDialog = () => {
-    const totalShots = shots.length || 1;
-    setExportColumnsText("2");
-    setExportStartIndexText("1");
-    setExportEndIndexText(String(totalShots));
-    setExportResizeEnabled(false);
-    setExportMaxLongestEdgeText("2024");
-    setExportDialogOpen(true);
+    startPlayback();
   };
 
   useEffect(() => {
@@ -1251,71 +897,6 @@ export function ShotsPage({ project }: ShotsPageProps) {
     return () => window.removeEventListener("paste", onPaste, true);
   }, [updateShotMedia]);
 
-  useEffect(() => {
-    if (!playbackOpen) {
-      if (playbackTimerRef.current) {
-        clearTimeout(playbackTimerRef.current);
-        playbackTimerRef.current = null;
-      }
-      return;
-    }
-
-    if (!shots.length) {
-      closePlayback();
-      return;
-    }
-
-    if (playbackIndex >= shots.length) {
-      setPlaybackIndex(shots.length - 1);
-      return;
-    }
-
-    const currentShot = shots[playbackIndex];
-    if (!currentShot) return;
-
-    setActiveShotId(currentShot.id);
-    const useVideoEnded = displayMode === "clip" && !!getPlayableRelative(currentShot, "clip");
-    if (!useVideoEnded) {
-      const durationMs = resolveShotDurationMs(currentShot.durationSeconds);
-      playbackTimerRef.current = setTimeout(() => {
-        if (playbackIndex >= shots.length - 1) {
-          closePlayback();
-          return;
-        }
-        setPlaybackIndex((current) => current + 1);
-      }, durationMs);
-    }
-
-    return () => {
-      if (playbackTimerRef.current) {
-        clearTimeout(playbackTimerRef.current);
-        playbackTimerRef.current = null;
-      }
-    };
-  }, [playbackOpen, playbackIndex, shots, displayMode]);
-
-  useEffect(() => {
-    if (!playbackOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closePlayback();
-        return;
-      }
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-        stepPlayback(1);
-        return;
-      }
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        stepPlayback(-1);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [playbackOpen, shots.length]);
-
   const closeImageMenu = () => {
     setImageMenuShotId(null);
     setImageMenuPos(null);
@@ -1346,36 +927,72 @@ export function ShotsPage({ project }: ShotsPageProps) {
     if (!relative) return "";
     return joinPath(sceneDir, relative);
   };
-  const playbackMedia: PlaybackMedia = useMemo(() => {
-    if (!playbackShot) {
-      return { kind: "placeholder", path: "", sourceMode: null };
-    }
-
-    const modeOrder = displayMode === "clip"
-      ? (["clip", "still", "reference", "concept"] as ShotDisplayMode[])
-      : displayMode === "still"
-        ? (["still", "reference", "concept"] as ShotDisplayMode[])
-        : displayMode === "reference"
-          ? (["reference", "concept"] as ShotDisplayMode[])
-          : (["concept"] as ShotDisplayMode[]);
-
-    for (const mode of modeOrder) {
-      const path = shotAssetPath(playbackShot, mode);
-      if (!path) continue;
-      return {
-        kind: mode === "clip" ? "video" : "image",
-        path,
-        sourceMode: mode,
-      };
-    }
-
-    return { kind: "placeholder", path: "", sourceMode: null };
-  }, [playbackShot, displayMode, sceneDir]);
+  const {
+    playbackOpen,
+    playbackIndex,
+    playbackShot,
+    playbackMedia,
+    startPlayback,
+    closePlayback,
+    stepPlayback,
+  } = useShotPlayback({
+    shots,
+    displayMode,
+    resolvePath: shotAssetPath,
+    onActivateShot: setActiveShotId,
+  });
+  const {
+    exportDialogOpen,
+    exportColumnsText,
+    exportStartIndexText,
+    exportEndIndexText,
+    exportResizeEnabled,
+    exportMaxLongestEdgeText,
+    gridExportBusy,
+    gridExportMessage,
+    setExportColumnsText,
+    setExportStartIndexText,
+    setExportEndIndexText,
+    setExportResizeEnabled,
+    setExportMaxLongestEdgeText,
+    openExportDialog,
+    closeExportDialog,
+    exportSceneGrid,
+  } = useShotsExport({
+    activeScene: activeScene ? { id: activeScene.id, name: activeScene.name } : null,
+    shots,
+    displayMode,
+    scenesRoot,
+    projectWidth,
+    projectHeight,
+    resolveShotAssetPath: (shot, mode) => shotAssetPath(shot, mode),
+  });
+  const {
+    createShot: createShotCrud,
+    moveShot,
+    deleteShot,
+    updateDescription,
+    updateShot,
+  } = useShotsCrud({
+    scenesRoot,
+    shots,
+    shotsIndex,
+    activeSceneId,
+    activeSceneIdRef,
+    activeShotIdRef,
+    shotsRef,
+    persistTimerRef,
+    modeFolders: SHOT_MODES,
+    saveShotsState,
+    setShotsIndex,
+    setActiveShotId,
+  });
 
   const menuShot = shots.find((shot) => shot.id === imageMenuShotId) ?? null;
   const menuShotAssetPath = menuShot ? shotAssetPath(menuShot) : "";
   const modeIsImage = displayMode !== "clip";
   const canCreateEmptyConcept = displayMode === "concept" && !!menuShot;
+  const revealLabel = isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer";
 
   const replaceMenuShotAsset = async () => {
     if (!menuShot) return;
@@ -1392,7 +1009,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
     const shotId = menuShot.id;
     const width = resolveProjectDimension(project.settings?.width, 1920);
     const height = resolveProjectDimension(project.settings?.height, 1080);
-    const conceptDir = joinPath(joinPath(shotsDirForScene(sceneId), shotId), modeFolderName("concept"));
+    const conceptDir = joinPath(joinPath(shotsDirForScene(scenesRoot, sceneId), shotId), modeFolderName("concept"));
     await electron.ensureDir(conceptDir);
 
     const fileName = await uniqueFileName(conceptDir, `empty_${width}x${height}.png`);
@@ -1452,7 +1069,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
   useEscapeKey(versionsOpen, closeVersionsBrowser);
   useEscapeKey(poolOpen, () => setPoolOpen(false));
   useEscapeKey(candidatesOpen, () => setCandidatesOpen(false));
-  useEscapeKey(exportDialogOpen, () => setExportDialogOpen(false));
+  useEscapeKey(exportDialogOpen, closeExportDialog);
 
   const setFavoriteForAsset = async (asset: ShotModeAsset) => {
     if (!activeShotId || !activeSceneId) return;
@@ -1622,215 +1239,28 @@ export function ShotsPage({ project }: ShotsPageProps) {
               onDisplayModeChange={setDisplayMode}
             />
 
-            <section className="panel">
-              <div className="shots-list">
-                {shots.map((shot, idx) => {
-                  const preview = (shot.description || "").replace(/\s+/g, " ").trim();
-                  const assetAbsolute = shotAssetPath(shot);
-                  const isActive = shot.id === activeShotId;
-                  const shotNumber = String(idx + 1).padStart(2, "0");
-                  return (
-                    <div
-                      key={shot.id}
-                      className="shots-item"
-                      ref={(element) => {
-                        shotItemRefs.current[shot.id] = element;
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className={`shots-row${isActive ? " shots-row--active" : ""}`}
-                        onClick={() => setActiveShotId(shot.id)}
-                      >
-                        <div className="shots-row__number">
-                          <button
-                            type="button"
-                            className="shots-row__move-button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void moveShot(shot.id, -1);
-                            }}
-                            aria-label="Move shot up"
-                            title="Move up"
-                          >
-                            <img src="icons/up.png" alt="" aria-hidden="true" />
-                          </button>
-                          <span className="shots-row__number-label">{shotNumber}</span>
-                          <button
-                            type="button"
-                            className="shots-row__move-button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void moveShot(shot.id, 1);
-                            }}
-                            aria-label="Move shot down"
-                            title="Move down"
-                          >
-                            <img src="icons/down.png" alt="" aria-hidden="true" />
-                          </button>
-                        </div>
-                        <div className="shots-row__image">
-                          {assetAbsolute ? (
-                            displayMode === "clip" ? (
-                              <video src={toFileUrl(assetAbsolute)} muted playsInline preload="metadata" />
-                            ) : (
-                              <img src={toFileUrl(assetAbsolute)} alt="" />
-                            )
-                          ) : (
-                            <span className="muted">{displayMode === "clip" ? "Clip" : "Image"}</span>
-                          )}
-                        </div>
-                        <div className="shots-row__text">
-                          {preview || <span className="muted">Start of the description text...</span>}
-                        </div>
-                        <div className="shots-row__delete" onClick={(event) => event.stopPropagation()}>
-                          <button
-                            type="button"
-                            className="shots-row__delete-button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              requestDeleteShot(shot);
-                            }}
-                            aria-label="Delete shot"
-                            title="Delete shot"
-                          >
-                            <img src="icons/delete.png" alt="" aria-hidden="true" />
-                          </button>
-                        </div>
-                      </button>
-
-                      {isActive ? (
-                        <div className="shots-inline-editor">
-                          <div className="shot-editor">
-                            <div className="shot-editor__image">
-                              <div className="shot-editor__media-shell">
-                                {assetAbsolute ? (
-                                  <div
-                                    className="shot-editor__image-preview"
-                                    onDoubleClick={() => openInlineFullscreen(shot)}
-                                    onContextMenu={(event) => openImageMenu(event, shot.id)}
-                                    onDragOver={handleDragOver}
-                                    onDrop={async (event) => {
-                                      const paths = await extractPathsFromDrop(event);
-                                      if (!paths.length) return;
-                                      setActiveShotId(shot.id);
-                                      await updateShotMedia(paths, { shotId: shot.id });
-                                    }}
-                                  >
-                                    {displayMode === "clip" ? (
-                                      <video src={toFileUrl(assetAbsolute)} controls preload="metadata" />
-                                    ) : (
-                                      <img src={toFileUrl(assetAbsolute)} alt="Shot" />
-                                    )}
-                                  </div>
-                                ) : (
-                                  <DropOrBrowse
-                                    label={displayMode === "clip" ? "Drop clip here or click to browse" : "Drop image here or click to browse"}
-                                    className="moodboard-dropzone"
-                                    onContextMenu={(event) => openImageMenu(event, shot.id)}
-                                    enablePasteContextMenu={false}
-                                    onPathsSelected={(paths) => void updateShotMedia(paths, { shotId: shot.id })}
-                                    browse={async () => {
-                                      await browseShotMedia({ shotId: shot.id });
-                                      return null;
-                                    }}
-                                  />
-                                )}
-                                <button
-                                  type="button"
-                                  className="shot-editor__versions-button"
-                                  title={`Browse ${displayMode} versions`}
-                                  onClick={() => openVersionsBrowser(shot.id)}
-                                >
-                                  {VersionsIcon}
-                                  <span className="sr-only">Browse versions</span>
-                                </button>
-                              </div>
-                            </div>
-
-                            <div className="shot-editor__properties">
-                              <div className="shot-editor__meta">
-                                <label className="form-row">
-                                  <span className="section-title">Duration (seconds)</span>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    className="form-input"
-                                    value={shot.durationSeconds ?? ""}
-                                    onChange={(event) => {
-                                      const raw = event.target.value.trim();
-                                      const parsed = raw === "" ? null : Number.parseFloat(raw);
-                                      if (raw !== "" && Number.isNaN(parsed)) {
-                                        return;
-                                      }
-                                      void updateShot(shot.id, (prev) => ({ ...prev, durationSeconds: parsed }));
-                                    }}
-                                    placeholder="e.g. 2.50"
-                                  />
-                                </label>
-                                <label className="form-row">
-                                  <span className="section-title">Framing</span>
-                                  <input
-                                    className="form-input"
-                                    value={shot.framing ?? ""}
-                                    onChange={(event) => {
-                                      void updateShot(shot.id, (prev) => ({ ...prev, framing: event.target.value }));
-                                    }}
-                                    placeholder="e.g. CU / MS / WS"
-                                  />
-                                </label>
-                              </div>
-
-                              <label className="form-row">
-                                <span className="section-title">Description</span>
-                                <textarea
-                                  rows={4}
-                                  className="form-input shot-editor__textarea"
-                                  value={shot.description}
-                                  onChange={(event) => {
-                                    void updateDescription(shot.id, event.target.value);
-                                  }}
-                                  placeholder="Describe the shot..."
-                                />
-                              </label>
-
-                              <label className="form-row">
-                                <span className="section-title">Action</span>
-                                <textarea
-                                  rows={2}
-                                  className="form-input shot-editor__textarea shot-editor__textarea--small"
-                                  value={shot.action ?? ""}
-                                  onChange={(event) => {
-                                    void updateShot(shot.id, (prev) => ({ ...prev, action: event.target.value }));
-                                  }}
-                                  placeholder="Action in the shot..."
-                                />
-                              </label>
-
-                              <label className="form-row">
-                                <span className="section-title">Camera</span>
-                                <textarea
-                                  rows={2}
-                                  className="form-input shot-editor__textarea shot-editor__textarea--small"
-                                  value={shot.camera ?? ""}
-                                  onChange={(event) => {
-                                    void updateShot(shot.id, (prev) => ({ ...prev, camera: event.target.value }));
-                                  }}
-                                  placeholder="Camera movement/behavior..."
-                                />
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-                {shots.length ? <div className="shots-list__tail-space" aria-hidden /> : null}
-                {!shots.length ? <p className="muted">No shots yet.</p> : null}
-              </div>
-            </section>
+            <ShotsList
+              shots={shots}
+              activeShotId={activeShotId}
+              displayMode={displayMode}
+              versionsIcon={VersionsIcon}
+              setShotItemRef={(shotId, element) => {
+                shotItemRefs.current[shotId] = element;
+              }}
+              getShotAssetPath={shotAssetPath}
+              onSelectShot={setActiveShotId}
+              onMoveShot={(shotId, direction) => {
+                void moveShot(shotId, direction);
+              }}
+              onRequestDeleteShot={(shot) => requestDeleteShot(shot)}
+              onOpenInlineFullscreen={openInlineFullscreen}
+              onOpenImageMenu={openImageMenu}
+              onUpdateShotMedia={updateShotMedia}
+              onBrowseShotMedia={browseShotMedia}
+              onOpenVersionsBrowser={openVersionsBrowser}
+              onUpdateShot={updateShot}
+              onUpdateDescription={updateDescription}
+            />
           </>
         )}
       </div>
@@ -1863,89 +1293,40 @@ export function ShotsPage({ project }: ShotsPageProps) {
         onRequestDeleteAsset={requestDeleteAsset}
       />
 
-      {poolOpen ? (
-        <div className="modal-backdrop" onClick={() => setPoolOpen(false)}>
-          <div className="modal shot-pool-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal__header">
-              <h3 className="modal__title">
-                Scene Pool
-              </h3>
-              <button type="button" className="pill-button" onClick={() => setPoolOpen(false)}>
-                Close
-              </button>
-            </div>
-            {poolLoading ? <p className="muted">Loading pool images...</p> : null}
-            {!poolLoading && !poolAssets.length ? (
-              <p className="muted">No images found in this scene's referenced Character/Props and Moodboards.</p>
-            ) : null}
-            {!poolLoading && poolAssets.length ? (
-              <MediaTileGrid
-                items={poolMediaItems}
-                className="moodboard-grid shot-pool-grid"
-                getKey={(item) => item.path}
-                onOpen={(_item, idx) => setPoolPreviewIndex(idx)}
-                onContextMenu={(event, item) => openPoolMenu(event, item)}
-                renderActions={(asset) => (
-                  <div className="shot-pool-grid__meta">{asset.source}</div>
-                )}
-              />
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      <ScenePoolModal
+        open={poolOpen}
+        loading={poolLoading}
+        assets={poolAssets}
+        mediaItems={poolMediaItems}
+        onClose={() => setPoolOpen(false)}
+        onOpenPreview={(idx) => setPoolPreviewIndex(idx)}
+        onContextMenu={(event, item) => openPoolMenu(event, item)}
+      />
 
-      {candidatesOpen ? (
-        <div className="modal-backdrop" onClick={() => setCandidatesOpen(false)}>
-          <div className="modal shot-pool-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal__header">
-              <h3 className="modal__title">Candidates</h3>
-              <button type="button" className="pill-button" onClick={() => setCandidatesOpen(false)}>
-                Close
-              </button>
-            </div>
-
-            <SegmentedControl
-              className="shot-candidates__tabs"
-              ariaLabel="Candidates tab"
-              options={candidateTabOptions}
-              value={candidateTab}
-              onChange={setCandidateTab}
-            />
-
-            <DropOrBrowse
-              className="moodboard-dropzone"
-              label="Drop media here or click to browse"
-              enablePasteContextMenu={false}
-              onPathsSelected={(paths) => {
-                void importCandidatePaths(paths);
-              }}
-              browse={async () => {
-                const picked = await window.electronAPI.pickFile({
-                  title: candidateTab === "stills" ? "Select candidate still" : "Select candidate clip",
-                  filters: [
-                    { name: "Media", extensions: ["png", "jpg", "jpeg", "webp", ...VIDEO_EXTENSIONS] },
-                  ],
-                });
-                return picked;
-              }}
-            />
-
-            {candidateLoading ? <p className="muted">Loading candidates...</p> : null}
-            {!candidateLoading && !candidateAssets.length ? (
-              <p className="muted">No assets in this folder yet.</p>
-            ) : null}
-            {!candidateLoading && candidateAssets.length ? (
-              <MediaTileGrid
-                items={candidateMediaItems}
-                className="moodboard-grid shot-pool-grid"
-                getKey={(item) => item.path}
-                onOpen={(_item, idx) => setCandidatePreviewIndex(idx)}
-                onContextMenu={(event, item) => openCandidateMenu(event, item)}
-              />
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      <CandidatesModal
+        open={candidatesOpen}
+        candidateTab={candidateTab}
+        candidateTabOptions={candidateTabOptions}
+        loading={candidateLoading}
+        assets={candidateAssets}
+        mediaItems={candidateMediaItems}
+        onClose={() => setCandidatesOpen(false)}
+        onTabChange={setCandidateTab}
+        onImportPaths={(paths) => {
+          void importCandidatePaths(paths);
+        }}
+        onBrowse={async () => {
+          const picked = await window.electronAPI.pickFile({
+            title: candidateTab === "stills" ? "Select candidate still" : "Select candidate clip",
+            filters: [
+              { name: "Media", extensions: ["png", "jpg", "jpeg", "webp", ...VIDEO_EXTENSIONS] },
+            ],
+          });
+          return picked;
+        }}
+        onOpenPreview={(idx) => setCandidatePreviewIndex(idx)}
+        onContextMenu={(event, item) => openCandidateMenu(event, item)}
+      />
 
       <ExportGridDialog
         open={exportDialogOpen}
@@ -1955,193 +1336,54 @@ export function ShotsPage({ project }: ShotsPageProps) {
         exportEndIndexText={exportEndIndexText}
         exportResizeEnabled={exportResizeEnabled}
         exportMaxLongestEdgeText={exportMaxLongestEdgeText}
-        tileWidth={resolveProjectDimension(project.settings?.width, 1920)}
-        tileHeight={resolveProjectDimension(project.settings?.height, 1080)}
+        tileWidth={projectWidth}
+        tileHeight={projectHeight}
         gridExportBusy={gridExportBusy}
         onChangeColumns={setExportColumnsText}
         onChangeStartIndex={setExportStartIndexText}
         onChangeEndIndex={setExportEndIndexText}
         onChangeResizeEnabled={setExportResizeEnabled}
         onChangeMaxLongestEdge={setExportMaxLongestEdgeText}
-        onCancel={() => setExportDialogOpen(false)}
+        onCancel={closeExportDialog}
         onExport={() => {
           void exportSceneGrid();
         }}
       />
 
-      <MediaLightbox
-        open={Boolean(previewAsset)}
-        path={previewAsset?.path ?? null}
-        isVideo={previewAsset ? inferMediaKind(previewAsset.path) === "video" : false}
-        name={previewAsset?.name}
-        onClose={() => setPreviewIndex(null)}
-        onNext={() => {
-          if (!modeAssets.length) return;
-          setPreviewIndex((prev) => {
-            if (prev === null) return prev;
-            return (prev + 1) % modeAssets.length;
-          });
+      <ShotsLightboxes
+        previewAsset={previewAsset}
+        modeAssetsCount={modeAssets.length}
+        displayMode={displayMode}
+        onSetPreviewIndex={setPreviewIndex}
+        onOpenVersionMenu={(event, asset) => openVersionMenu(event, asset)}
+        onCopyImageToClipboard={(path) => {
+          void electron.copyImageToClipboard(path);
         }}
-        onPrev={() => {
-          if (!modeAssets.length) return;
-          setPreviewIndex((prev) => {
-            if (prev === null) return prev;
-            return (prev - 1 + modeAssets.length) % modeAssets.length;
-          });
+        onRevealInFileManager={(path) => {
+          void electron.revealInFileManager(path);
         }}
-        onContextMenu={(event) => {
-          if (!previewAsset) return;
-          openVersionMenu(event, previewAsset);
-        }}
-        onCopy={() => {
-          if (!previewAsset || displayMode === "clip") return;
-          void electron.copyImageToClipboard(previewAsset.path);
-        }}
-        onReveal={() => {
-          if (!previewAsset) return;
-          void electron.revealInFileManager(previewAsset.path);
-        }}
+        poolPreviewAsset={poolPreviewAsset}
+        poolAssetsCount={poolAssets.length}
+        onSetPoolPreviewIndex={setPoolPreviewIndex}
+        onOpenPoolMenu={(event, asset) => openPoolMenu(event, asset)}
+        candidatePreviewAsset={candidatePreviewAsset}
+        candidateAssetsCount={candidateAssets.length}
+        onSetCandidatePreviewIndex={setCandidatePreviewIndex}
+        onOpenCandidateMenu={(event, asset) => openCandidateMenu(event, asset)}
+        inlineFullscreenAsset={inlineFullscreenAsset}
+        onCloseInlineFullscreen={() => setInlineFullscreenAsset(null)}
       />
 
-      <MediaLightbox
-        open={Boolean(poolPreviewAsset)}
-        path={poolPreviewAsset?.path ?? null}
-        isVideo={false}
-        name={poolPreviewAsset?.name}
-        meta={poolPreviewAsset?.source}
-        onClose={() => setPoolPreviewIndex(null)}
-        onNext={() => {
-          if (!poolAssets.length) return;
-          setPoolPreviewIndex((prev) => {
-            if (prev === null) return prev;
-            return (prev + 1) % poolAssets.length;
-          });
-        }}
-        onPrev={() => {
-          if (!poolAssets.length) return;
-          setPoolPreviewIndex((prev) => {
-            if (prev === null) return prev;
-            return (prev - 1 + poolAssets.length) % poolAssets.length;
-          });
-        }}
-        onCopy={() => {
-          if (!poolPreviewAsset) return;
-          void electron.copyImageToClipboard(poolPreviewAsset.path);
-        }}
-        onReveal={() => {
-          if (!poolPreviewAsset) return;
-          void electron.revealInFileManager(poolPreviewAsset.path);
-        }}
-        onContextMenu={(event) => {
-          if (!poolPreviewAsset) return;
-          openPoolMenu(event, poolPreviewAsset);
-        }}
+      <ShotsPlaybackOverlay
+        open={playbackOpen}
+        playbackShot={playbackShot}
+        playbackMedia={playbackMedia}
+        playbackIndex={playbackIndex}
+        shotsLength={shots.length}
+        activeSceneName={activeScene?.name ?? null}
+        onClose={closePlayback}
+        onStep={stepPlayback}
       />
-
-      <MediaLightbox
-        open={Boolean(candidatePreviewAsset)}
-        path={candidatePreviewAsset?.path ?? null}
-        isVideo={candidatePreviewAsset ? inferMediaKind(candidatePreviewAsset.path) === "video" : false}
-        name={candidatePreviewAsset?.name}
-        onClose={() => setCandidatePreviewIndex(null)}
-        onNext={() => {
-          if (!candidateAssets.length) return;
-          setCandidatePreviewIndex((prev) => {
-            if (prev === null) return prev;
-            return (prev + 1) % candidateAssets.length;
-          });
-        }}
-        onPrev={() => {
-          if (!candidateAssets.length) return;
-          setCandidatePreviewIndex((prev) => {
-            if (prev === null) return prev;
-            return (prev - 1 + candidateAssets.length) % candidateAssets.length;
-          });
-        }}
-        onCopy={() => {
-          if (!candidatePreviewAsset || inferMediaKind(candidatePreviewAsset.path) === "video") return;
-          void electron.copyImageToClipboard(candidatePreviewAsset.path);
-        }}
-        onReveal={() => {
-          if (!candidatePreviewAsset) return;
-          void electron.revealInFileManager(candidatePreviewAsset.path);
-        }}
-        onContextMenu={(event) => {
-          if (!candidatePreviewAsset) return;
-          openCandidateMenu(event, candidatePreviewAsset);
-        }}
-      />
-
-      <MediaLightbox
-        open={Boolean(inlineFullscreenAsset)}
-        path={inlineFullscreenAsset?.path ?? null}
-        isVideo={inlineFullscreenAsset?.isVideo ?? false}
-        name={inlineFullscreenAsset?.name}
-        onClose={() => setInlineFullscreenAsset(null)}
-        onCopy={() => {
-          if (!inlineFullscreenAsset || inlineFullscreenAsset.isVideo) return;
-          void electron.copyImageToClipboard(inlineFullscreenAsset.path);
-        }}
-        onReveal={() => {
-          if (!inlineFullscreenAsset) return;
-          void electron.revealInFileManager(inlineFullscreenAsset.path);
-        }}
-      />
-
-      {playbackOpen && playbackShot ? (
-        <div className="shots-playback" onClick={closePlayback}>
-          <div className="shots-playback__inner" onClick={(event) => event.stopPropagation()}>
-            <div className="shots-playback__header">
-              <div className="shots-playback__title">
-                <strong>
-                  {String(playbackIndex + 1).padStart(2, "0")} / {String(shots.length).padStart(2, "0")}
-                </strong>
-                <span>{activeScene ? `Scene: ${activeScene.name}` : "Scene preview"}</span>
-              </div>
-              <div className="shots-playback__actions">
-                <button type="button" className="pill-button" onClick={() => stepPlayback(-1)} disabled={playbackIndex <= 0}>
-                  Prev
-                </button>
-                <button type="button" className="pill-button" onClick={() => stepPlayback(1)}>
-                  Next
-                </button>
-                <button type="button" className="pill-button" onClick={closePlayback}>
-                  Close
-                </button>
-              </div>
-            </div>
-
-            <div className="shots-playback__media">
-              {playbackMedia.kind === "video" ? (
-                <video
-                  key={playbackMedia.path}
-                  src={toFileUrl(playbackMedia.path)}
-                  autoPlay
-                  muted
-                  playsInline
-                  onEnded={() => stepPlayback(1)}
-                  onError={() => stepPlayback(1)}
-                />
-              ) : playbackMedia.kind === "image" ? (
-                <img src={toFileUrl(playbackMedia.path)} alt={playbackShot.description || "Shot preview"} />
-              ) : (
-                <div className="shots-playback__empty shots-playback__empty--numbered">
-                  <div className="shots-playback__empty-number">{String(playbackIndex + 1).padStart(2, "0")}</div>
-                  <div className="shots-playback__empty-label">Shot</div>
-                </div>
-              )}
-            </div>
-
-            <div className="shots-playback__meta">
-              <div className="shots-playback__duration">
-                Source: {playbackMedia.sourceMode ? playbackModeLabel(playbackMedia.sourceMode) : "Placeholder"}
-              </div>
-              <div className="shots-playback__duration">Duration: {formatDurationLabel(playbackShot.durationSeconds)}</div>
-              <div className="shots-playback__description">{playbackShot.description || "No shot description."}</div>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <ConfirmDialog
         open={assetDeleteOpen}
@@ -2156,174 +1398,70 @@ export function ShotsPage({ project }: ShotsPageProps) {
         cancelLabel="Cancel"
       />
 
-      <MediaContextMenu
-        open={Boolean(imageMenuPos && menuShot)}
-        position={imageMenuPos}
-        onClose={closeImageMenu}
-        actions={[
-          {
-            key: "replace",
-            label: displayMode === "clip"
-              ? (menuShotAssetPath ? "Replace clip" : "Add clip")
-              : (menuShotAssetPath ? "Replace image" : "Add image"),
-            visible: Boolean(menuShot),
-            onSelect: async () => {
-              await replaceMenuShotAsset();
-            },
-          },
-          {
-            key: "create-empty",
-            label: "Create empty image",
-            visible: canCreateEmptyConcept,
-            onSelect: async () => {
-              await createEmptyConceptImage();
-            },
-          },
-          {
-            key: "open-ps",
-            label: "Open in Photoshop",
-            visible: modeIsImage && Boolean(menuShotAssetPath),
-            onSelect: async () => {
-              await openMenuShotInPhotoshop();
-            },
-          },
-          {
-            key: "copy",
-            label: "Copy to Clipboard",
-            visible: modeIsImage && Boolean(menuShotAssetPath),
-            onSelect: async () => {
-              await copyMenuShotToClipboard();
-            },
-          },
-          {
-            key: "reveal",
-            label: isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer",
-            visible: Boolean(menuShotAssetPath),
-            onSelect: async () => {
-              await revealMenuShotInExplorer();
-            },
-          },
-        ]}
-      />
-
-      <MediaContextMenu
-        open={Boolean(versionMenuPos && versionMenuAsset)}
-        position={versionMenuPos}
-        onClose={closeVersionMenu}
-        actions={[
-          {
-            key: "set-favorite",
-            label: "Set favorite",
-            visible: Boolean(versionMenuAsset && !versionMenuAsset.isFavorite),
-            onSelect: async () => {
-              if (!versionMenuAsset) return;
-              await setFavoriteForAsset(versionMenuAsset);
-              closeVersionMenu();
-            },
-          },
-          {
-            key: "delete-version",
-            label: "Delete version",
-            visible: Boolean(versionMenuAsset),
-            onSelect: async () => {
-              if (!versionMenuAsset) return;
-              requestDeleteAsset(versionMenuAsset);
-              closeVersionMenu();
-            },
-          },
-          {
-            key: "open-ps",
-            label: "Open in Photoshop",
-            visible: Boolean(versionMenuAsset && displayMode !== "clip"),
-            onSelect: async () => {
-              await openVersionAssetInPhotoshop();
-            },
-          },
-          {
-            key: "copy",
-            label: "Copy to Clipboard",
-            visible: Boolean(versionMenuAsset && displayMode !== "clip"),
-            onSelect: async () => {
-              await copyVersionAssetToClipboard();
-            },
-          },
-          {
-            key: "reveal",
-            label: isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer",
-            visible: Boolean(versionMenuAsset),
-            onSelect: async () => {
-              await revealVersionAssetInExplorer();
-            },
-          },
-        ]}
-      />
-
-      <MediaContextMenu
-        open={Boolean(poolMenuPos && poolMenuAsset)}
-        position={poolMenuPos}
-        onClose={closePoolMenu}
-        actions={[
-          {
-            key: "open-ps",
-            label: "Open in Photoshop",
-            visible: Boolean(poolMenuAsset),
-            onSelect: async () => {
-              if (!poolMenuAsset) return;
-              const configuredPath = appSettings.photoshopPath.trim();
-              if (!configuredPath) return;
-              await electron.openWithApp(configuredPath, poolMenuAsset.path);
-              closePoolMenu();
-            },
-          },
-          {
-            key: "copy",
-            label: "Copy to Clipboard",
-            visible: Boolean(poolMenuAsset),
-            onSelect: async () => {
-              if (!poolMenuAsset) return;
-              await electron.copyImageToClipboard(poolMenuAsset.path);
-              closePoolMenu();
-            },
-          },
-          {
-            key: "reveal",
-            label: isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer",
-            visible: Boolean(poolMenuAsset),
-            onSelect: async () => {
-              if (!poolMenuAsset) return;
-              await electron.revealInFileManager(poolMenuAsset.path);
-              closePoolMenu();
-            },
-          },
-        ]}
-      />
-
-      <MediaContextMenu
-        open={Boolean(candidateMenuPos && candidateMenuAsset)}
-        position={candidateMenuPos}
-        onClose={closeCandidateMenu}
-        actions={[
-          {
-            key: "copy",
-            label: "Copy to Clipboard",
-            visible: Boolean(candidateMenuAsset && inferMediaKind(candidateMenuAsset.path) !== "video"),
-            onSelect: async () => {
-              if (!candidateMenuAsset) return;
-              await electron.copyImageToClipboard(candidateMenuAsset.path);
-              closeCandidateMenu();
-            },
-          },
-          {
-            key: "reveal",
-            label: isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer",
-            visible: Boolean(candidateMenuAsset),
-            onSelect: async () => {
-              if (!candidateMenuAsset) return;
-              await electron.revealInFileManager(candidateMenuAsset.path);
-              closeCandidateMenu();
-            },
-          },
-        ]}
+      <ShotsContextMenus
+        revealLabel={revealLabel}
+        imageMenuPos={imageMenuPos}
+        imageMenuOpen={Boolean(imageMenuPos && menuShot)}
+        imageMenuHasShot={Boolean(menuShot)}
+        menuShotAssetPath={menuShotAssetPath}
+        modeIsImage={modeIsImage}
+        displayMode={displayMode}
+        canCreateEmptyConcept={canCreateEmptyConcept}
+        onCloseImageMenu={closeImageMenu}
+        onReplaceMenuShotAsset={replaceMenuShotAsset}
+        onCreateEmptyConceptImage={createEmptyConceptImage}
+        onOpenMenuShotInPhotoshop={openMenuShotInPhotoshop}
+        onCopyMenuShotToClipboard={copyMenuShotToClipboard}
+        onRevealMenuShotInExplorer={revealMenuShotInExplorer}
+        versionMenuPos={versionMenuPos}
+        versionMenuAsset={versionMenuAsset}
+        onCloseVersionMenu={closeVersionMenu}
+        onSetFavoriteForVersionMenuAsset={async () => {
+          if (!versionMenuAsset) return;
+          await setFavoriteForAsset(versionMenuAsset);
+          closeVersionMenu();
+        }}
+        onDeleteVersionMenuAsset={() => {
+          if (!versionMenuAsset) return;
+          requestDeleteAsset(versionMenuAsset);
+          closeVersionMenu();
+        }}
+        onOpenVersionAssetInPhotoshop={openVersionAssetInPhotoshop}
+        onCopyVersionAssetToClipboard={copyVersionAssetToClipboard}
+        onRevealVersionAssetInExplorer={revealVersionAssetInExplorer}
+        poolMenuPos={poolMenuPos}
+        poolMenuAsset={poolMenuAsset}
+        onClosePoolMenu={closePoolMenu}
+        onOpenPoolAssetInPhotoshop={async () => {
+          if (!poolMenuAsset) return;
+          const configuredPath = appSettings.photoshopPath.trim();
+          if (!configuredPath) return;
+          await electron.openWithApp(configuredPath, poolMenuAsset.path);
+          closePoolMenu();
+        }}
+        onCopyPoolAssetToClipboard={async () => {
+          if (!poolMenuAsset) return;
+          await electron.copyImageToClipboard(poolMenuAsset.path);
+          closePoolMenu();
+        }}
+        onRevealPoolAssetInExplorer={async () => {
+          if (!poolMenuAsset) return;
+          await electron.revealInFileManager(poolMenuAsset.path);
+          closePoolMenu();
+        }}
+        candidateMenuPos={candidateMenuPos}
+        candidateMenuAsset={candidateMenuAsset}
+        onCloseCandidateMenu={closeCandidateMenu}
+        onCopyCandidateAssetToClipboard={async () => {
+          if (!candidateMenuAsset) return;
+          await electron.copyImageToClipboard(candidateMenuAsset.path);
+          closeCandidateMenu();
+        }}
+        onRevealCandidateAssetInExplorer={async () => {
+          if (!candidateMenuAsset) return;
+          await electron.revealInFileManager(candidateMenuAsset.path);
+          closeCandidateMenu();
+        }}
       />
     </div>
   );
