@@ -6,6 +6,8 @@ import { ConfirmDialog } from "../components/common/ConfirmDialog";
 import { MdxTextSection } from "../components/common/MdxTextSection";
 import { useAppState } from "../state/appState";
 import { ImageAssetField } from "../components/common/ImageAssetField";
+import { useEscapeKey } from "../hooks/useEscapeKey";
+import { buildSceneId, isValidSceneId, renameSceneIdPreservingToken } from "../utils/sceneId";
 
 interface ScenesPageProps {
   project: ProjectState;
@@ -34,6 +36,7 @@ interface SceneEditorProps {
   scenesRoot: string;
   projectFilePath: string | null;
   onUpdateScene: (sceneId: string, updater: (scene: SceneMeta) => SceneMeta) => void;
+  onRenameScene: (sceneId: string, nextName: string) => Promise<void>;
 }
 
 const EMPTY_INDEX: ScenesIndex = { scenes: [] };
@@ -185,8 +188,8 @@ export function ScenesPage({ project }: ScenesPageProps) {
   const createScene = async () => {
     const currentScenes = indexRef.current.scenes;
     const nextIndex = currentScenes.length + 1;
-    const id = makeStableId("scene");
     const name = `Scene ${String(nextIndex).padStart(2, "0")}`;
+    const id = makeSceneId(name);
 
     const scene: SceneMeta = {
       id,
@@ -219,6 +222,109 @@ export function ScenesPage({ project }: ScenesPageProps) {
     commitIndex({ scenes: nextScenes }, activeIdRef.current);
   }, [commitIndex]);
 
+  const renameSceneById = useCallback(async (sceneId: string, nextNameRaw: string): Promise<void> => {
+    const nextName = nextNameRaw.trim();
+    if (!nextName) {
+      throw new Error("Scene name cannot be empty.");
+    }
+
+    const current = indexRef.current;
+    const target = current.scenes.find((scene) => scene.id === sceneId);
+    if (!target) {
+      throw new Error("Scene not found.");
+    }
+
+    const nextId = renameSceneIdPreservingToken(target.id, nextName);
+    const idChanged = nextId !== target.id;
+    const fromDir = joinPath(scenesRoot, target.id);
+    const toDir = joinPath(scenesRoot, nextId);
+
+    if (idChanged) {
+      const [fromExists, toExists] = await Promise.all([
+        electron.exists(fromDir),
+        electron.exists(toDir),
+      ]);
+      if (!fromExists) {
+        throw new Error(`Scene folder does not exist: ${fromDir}`);
+      }
+      if (toExists) {
+        throw new Error(`Target scene folder already exists: ${toDir}`);
+      }
+    }
+
+    const nextScenes = current.scenes.map((scene) => {
+      if (scene.id !== sceneId) return scene;
+      return {
+        ...scene,
+        id: nextId,
+        name: nextName,
+      };
+    });
+    const normalized: ScenesIndex = {
+      scenes: normalizeSceneOrder(nextScenes),
+    };
+
+    // Wait for earlier index writes to complete before this critical rename flow.
+    await persistQueueRef.current.catch(() => undefined);
+
+    let renamedOnDisk = false;
+    let copiedOnDisk = false;
+    try {
+      if (idChanged) {
+        try {
+          await renameDirWithRetry(fromDir, toDir);
+          renamedOnDisk = true;
+        } catch (renameError) {
+          // Windows can return EPERM when a directory is temporarily locked.
+          // Fallback to copy so user-facing rename can still complete.
+          await electron.copyDir(fromDir, toDir);
+          copiedOnDisk = true;
+          if (!(await electron.exists(toDir))) {
+            throw renameError;
+          }
+        }
+      }
+
+      await electron.writeText(indexPath, JSON.stringify(normalized, null, 2));
+      persistQueueRef.current = Promise.resolve();
+
+      setIndex(normalized);
+      indexRef.current = normalized;
+
+      const currentActive = activeIdRef.current;
+      const resolvedActiveId = currentActive === sceneId ? nextId : currentActive;
+      setActiveId(resolvedActiveId);
+      activeIdRef.current = resolvedActiveId;
+      setSaveError(null);
+
+      if (copiedOnDisk) {
+        try {
+          await electron.deleteDir(fromDir);
+        } catch (cleanupError) {
+          setSaveError(`Scene renamed, but old folder cleanup failed: ${toErrorMessage(cleanupError)}`);
+        }
+      }
+    } catch (error) {
+      if (renamedOnDisk) {
+        try {
+          await electron.rename(toDir, fromDir);
+        } catch (rollbackError) {
+          throw new Error(
+            `Rename failed and rollback also failed. Rename: ${toErrorMessage(error)}. Rollback: ${toErrorMessage(rollbackError)}`,
+          );
+        }
+      }
+      if (copiedOnDisk) {
+        try {
+          await electron.deleteDir(toDir);
+        } catch {
+          // Keep original error below. This leaves duplicate data and should be handled manually.
+        }
+      }
+      throw error;
+    }
+  }, [indexPath, scenesRoot]);
+
   const moveActive = async (direction: -1 | 1) => {
     const currentActive = activeIdRef.current;
     if (!currentActive) return;
@@ -235,6 +341,19 @@ export function ScenesPage({ project }: ScenesPageProps) {
 
     const reordered = sorted.map((scene, order) => ({ ...scene, order }));
     commitIndex({ scenes: reordered }, currentActive);
+  };
+
+  const openActiveSceneFolder = async () => {
+    if (!activeScene) return;
+    const sceneDir = joinPath(scenesRoot, activeScene.id);
+    try {
+      const opened = await electron.openInExplorer(sceneDir);
+      if (!opened) {
+        setSaveError(`Failed to open scene folder: ${sceneDir}`);
+      }
+    } catch (error) {
+      setSaveError(`Failed to open scene folder: ${toErrorMessage(error)}`);
+    }
   };
 
   const requestDeleteScene = () => {
@@ -284,6 +403,9 @@ export function ScenesPage({ project }: ScenesPageProps) {
           </div>
           {activeScene ? (
             <div className="actions">
+              <button type="button" onClick={() => void openActiveSceneFolder()} title="Open scene folder">
+                Open folder
+              </button>
               <button type="button" onClick={() => void moveActive(-1)} title="Move up">Move Up</button>
               <button type="button" onClick={() => void moveActive(1)} title="Move down">Move Down</button>
               <button type="button" onClick={requestDeleteScene} title="Delete scene">Delete</button>
@@ -307,6 +429,7 @@ export function ScenesPage({ project }: ScenesPageProps) {
             scenesRoot={scenesRoot}
             projectFilePath={projectFilePath}
             onUpdateScene={updateSceneById}
+            onRenameScene={renameSceneById}
           />
         )}
       </div>
@@ -334,6 +457,7 @@ function SceneEditor({
   scenesRoot,
   projectFilePath,
   onUpdateScene,
+  onRenameScene,
 }: SceneEditorProps) {
   const sceneDir = joinPath(scenesRoot, scene.id);
   const scriptPath = joinPath(sceneDir, "scene.md");
@@ -345,7 +469,15 @@ function SceneEditor({
   const [characterBoardOptions, setCharacterBoardOptions] = useState<string[]>([]);
   const [moodboardOptions, setMoodboardOptions] = useState<string[]>([]);
   const [docLoadError, setDocLoadError] = useState<string | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState(scene.name);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const docsSeqRef = useRef(0);
+
+  useEscapeKey(renameOpen, () => {
+    setRenameOpen(false);
+    setRenameError(null);
+  });
 
   useEffect(() => {
     const seq = ++docsSeqRef.current;
@@ -431,6 +563,32 @@ function SceneEditor({
     onUpdateScene(scene.id, (previous) => ({ ...previous, image: fileName }));
   };
 
+  const openRenameDialog = () => {
+    setRenameValue(scene.name);
+    setRenameError(null);
+    setRenameOpen(true);
+  };
+
+  const submitRename = async () => {
+    const next = renameValue.trim();
+    if (!next) {
+      setRenameError("Scene name cannot be empty.");
+      return;
+    }
+    if (next === scene.name) {
+      setRenameOpen(false);
+      setRenameError(null);
+      return;
+    }
+    try {
+      await onRenameScene(scene.id, next);
+      setRenameOpen(false);
+      setRenameError(null);
+    } catch (error) {
+      setRenameError(toErrorMessage(error));
+    }
+  };
+
   const characterSlots = boardSlots(scene.characterPropBoards);
   const moodboardSlots = boardSlots(scene.moodboards);
 
@@ -478,13 +636,17 @@ function SceneEditor({
           <div className="scene-header-grid__meta">
             <label className="form-row">
               <span className="section-title">Scene Name</span>
-              <input
-                className="form-input"
-                value={scene.name}
-                onChange={(event) => {
-                  onUpdateScene(scene.id, (previous) => ({ ...previous, name: event.target.value }));
-                }}
-              />
+              <div className="scene-name-row">
+                <input
+                  className="form-input"
+                  value={scene.name}
+                  readOnly
+                  aria-readonly="true"
+                />
+                <button type="button" className="pill-button" onClick={openRenameDialog}>
+                  Rename
+                </button>
+              </div>
             </label>
 
             <label className="form-row">
@@ -636,6 +798,47 @@ function SceneEditor({
           />
         </section>
       </div>
+
+      {renameOpen ? (
+        <div className="modal-backdrop">
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal__header">
+              <h3 className="modal__title">Rename Scene</h3>
+            </div>
+            <div className="form-section">
+              <label className="form-row">
+                <span className="section-title">Scene Name</span>
+                <input
+                  className="form-input"
+                  value={renameValue}
+                  onChange={(event) => setRenameValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      void submitRename();
+                    }
+                  }}
+                />
+              </label>
+            </div>
+            {renameError ? <p className="error">{renameError}</p> : null}
+            <div className="modal__footer">
+              <button
+                type="button"
+                className="pill-button"
+                onClick={() => {
+                  setRenameOpen(false);
+                  setRenameError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button type="button" className="pill-button" onClick={() => void submitRename()}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -669,8 +872,8 @@ function normalizeLoadedScenes(input: SceneMeta[]): {
     const originalId = String(scene.id ?? "").trim();
     let id = originalId;
 
-    if (!id || usedIds.has(id)) {
-      id = makeStableId("scene");
+    if (!id || !isValidSceneId(id) || usedIds.has(id)) {
+      id = makeSceneId(scene.name);
       didNormalize = true;
       if (originalId) {
         idCopies.push({ fromId: originalId, toId: id });
@@ -725,11 +928,45 @@ function imageExtension(path: string): string | null {
   return null;
 }
 
-function makeStableId(prefix: string): string {
-  if (typeof globalThis.crypto !== "undefined" && "randomUUID" in globalThis.crypto) {
-    return `${prefix}-${globalThis.crypto.randomUUID()}`;
+function makeSceneId(namePart?: string): string {
+  return buildSceneId(makeSceneToken(), namePart);
+}
+
+function makeSceneToken(): string {
+  const timestamp = Date.now().toString(36);
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `${timestamp}${randomPart}`;
+}
+
+async function renameDirWithRetry(fromDir: string, toDir: string): Promise<void> {
+  const attempts = 4;
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await electron.rename(fromDir, toDir);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isWindowsEperm(error) || attempt === attempts - 1) {
+        break;
+      }
+      await sleep(120 * (attempt + 1));
+    }
   }
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+function isWindowsEperm(error: unknown): boolean {
+  const message = toErrorMessage(error).toUpperCase();
+  return message.includes("EPERM");
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function toErrorMessage(error: unknown): string {

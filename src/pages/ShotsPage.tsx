@@ -1490,7 +1490,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
                             aria-label="Move shot up"
                             title="Move up"
                           >
-                            <img src="/icons/up.png" alt="" aria-hidden="true" />
+                            <img src="icons/up.png" alt="" aria-hidden="true" />
                           </button>
                           <span className="shots-row__number-label">{shotNumber}</span>
                           <button
@@ -1503,7 +1503,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
                             aria-label="Move shot down"
                             title="Move down"
                           >
-                            <img src="/icons/down.png" alt="" aria-hidden="true" />
+                            <img src="icons/down.png" alt="" aria-hidden="true" />
                           </button>
                         </div>
                         <div className="shots-row__image">
@@ -1531,7 +1531,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
                             aria-label="Delete shot"
                             title="Delete shot"
                           >
-                            <img src="/icons/delete.png" alt="" aria-hidden="true" />
+                            <img src="icons/delete.png" alt="" aria-hidden="true" />
                           </button>
                         </div>
                       </button>

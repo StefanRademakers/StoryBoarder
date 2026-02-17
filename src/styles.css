@@ -1001,6 +1001,16 @@ button {
   gap: 10px;
 }
 
+.scene-name-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.scene-name-row .form-input {
+  flex: 1;
+}
+
 .scene-header-grid__image .image-asset-field__empty {
   min-height: 120px;
 }
