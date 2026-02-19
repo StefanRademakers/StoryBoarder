@@ -36,11 +36,13 @@ import {
   SHOT_MODES,
   capitalizeMode,
   createWhitePng,
+  fileExtension,
   getBaseName,
   imageExtensionFromName,
   isEditableTarget,
   isFileAllowedForMode,
   isMacPlatform,
+  isVideoExtension,
   isWebOrDataUrl,
   modeFolderName,
   normalizeShotsIndex,
@@ -933,6 +935,34 @@ export function ShotsPage({ project }: ShotsPageProps) {
     if (!relative) return "";
     return joinPath(sceneDir, relative);
   };
+
+  const resolveShotAssetPathForFcp7 = (shot: ShotItem): { path: string; mediaType: "video" | "image"; durationSeconds?: number | null } | null => {
+    if (!sceneDir) return null;
+    const pickRelative = (mode: "clip" | "still" | "concept"): string | null => {
+      const favorite = getFavoriteRelative(shot, mode).replace(/\\/g, "/").trim();
+      if (favorite && isFileAllowedForMode(favorite, mode)) {
+        return favorite;
+      }
+      const assets = getModeAssets(shot, mode);
+      for (let idx = assets.length - 1; idx >= 0; idx -= 1) {
+        const candidate = assets[idx];
+        if (isFileAllowedForMode(candidate, mode)) {
+          return candidate;
+        }
+      }
+      return null;
+    };
+
+    const relative = pickRelative("clip") ?? pickRelative("still") ?? pickRelative("concept");
+    if (!relative) return null;
+    const ext = fileExtension(relative);
+    const mediaType = ext && isVideoExtension(ext) ? "video" : "image";
+    return {
+      path: joinPath(sceneDir, relative),
+      mediaType,
+      durationSeconds: shot.durationSeconds ?? null,
+    };
+  };
   const {
     playbackOpen,
     playbackIndex,
@@ -964,14 +994,17 @@ export function ShotsPage({ project }: ShotsPageProps) {
     openExportDialog,
     closeExportDialog,
     exportSceneGrid,
+    exportSceneFcp7,
   } = useShotsExport({
     activeScene: activeScene ? { id: activeScene.id, name: activeScene.name } : null,
     shots,
     displayMode,
     scenesRoot,
+    projectFrameRate: resolveProjectDimension(project.settings?.framerate, 24),
     projectWidth,
     projectHeight,
     resolveShotAssetPath: (shot, mode) => shotAssetPath(shot, mode),
+    resolveFcp7Media: resolveShotAssetPathForFcp7,
   });
   const {
     createShot: createShotCrud,
@@ -1241,6 +1274,9 @@ export function ShotsPage({ project }: ShotsPageProps) {
                 void openCandidates();
               }}
               onOpenExport={openExportDialog}
+              onExportFcp7={() => {
+                void exportSceneFcp7();
+              }}
               onDisplayModeChange={setDisplayMode}
             />
 
@@ -1289,6 +1325,11 @@ export function ShotsPage({ project }: ShotsPageProps) {
         modeAssets={modeAssets}
         versionMediaItems={versionMediaItems}
         onClose={closeVersionsBrowser}
+        onRevealFolder={() => {
+          if (!activeSceneId || !activeShot) return;
+          const modeDir = joinPath(joinPath(shotsDirForScene(scenesRoot, activeSceneId), activeShot.id), modeFolderName(displayMode));
+          void electron.revealInFileManager(modeDir);
+        }}
         onOpenPreview={(idx) => setPreviewIndex(idx)}
         onOpenVersionMenu={(event, item) => openVersionMenu(event, item)}
         onSetFavorite={(asset) => {

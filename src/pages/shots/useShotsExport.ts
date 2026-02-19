@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { electron } from "../../services/electron";
 import { joinPath } from "../../utils/path";
 import type { ShotDisplayMode } from "./types";
-import { parsePositiveInteger, toErrorMessage } from "./utils";
+import { parsePositiveInteger, sanitizeFileName, toErrorMessage } from "./utils";
 
 interface ActiveSceneLike {
   id: string;
@@ -14,9 +14,11 @@ interface UseShotsExportParams<TShot> {
   shots: TShot[];
   displayMode: ShotDisplayMode;
   scenesRoot: string;
+  projectFrameRate: number;
   projectWidth: number;
   projectHeight: number;
   resolveShotAssetPath: (shot: TShot, mode: "concept" | "reference" | "still") => string;
+  resolveFcp7Media: (shot: TShot) => { path: string; mediaType: "video" | "image"; durationSeconds?: number | null } | null;
 }
 
 interface UseShotsExportResult {
@@ -36,6 +38,7 @@ interface UseShotsExportResult {
   openExportDialog: () => void;
   closeExportDialog: () => void;
   exportSceneGrid: () => Promise<void>;
+  exportSceneFcp7: () => Promise<void>;
 }
 
 export function useShotsExport<TShot>({
@@ -43,9 +46,11 @@ export function useShotsExport<TShot>({
   shots,
   displayMode,
   scenesRoot,
+  projectFrameRate,
   projectWidth,
   projectHeight,
   resolveShotAssetPath,
+  resolveFcp7Media,
 }: UseShotsExportParams<TShot>): UseShotsExportResult {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportColumnsText, setExportColumnsText] = useState("2");
@@ -164,6 +169,66 @@ export function useShotsExport<TShot>({
     shots,
   ]);
 
+  const exportSceneFcp7 = useCallback(async () => {
+    if (!activeScene || !shots.length || gridExportBusy) return;
+
+    const sceneDir = joinPath(scenesRoot, activeScene.id);
+    const exportDir = joinPath(sceneDir, "export");
+    const safeSceneName = sanitizeFileName(activeScene.name) || activeScene.id;
+    const outputPath = joinPath(exportDir, `${safeSceneName}_shots_fcp7.xml`);
+
+    const candidates = shots.map((shot, idx) => {
+      const media = resolveFcp7Media(shot);
+      if (!media?.path) return null;
+      return {
+        shotNumber: idx + 1,
+        path: media.path,
+        mediaType: media.mediaType,
+        durationSeconds: media.durationSeconds ?? null,
+      };
+    });
+
+    const items = [];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      if (!(await electron.exists(candidate.path))) continue;
+      items.push(candidate);
+    }
+
+    if (!items.length) {
+      setGridExportMessage("FCP7 export failed: no valid clip/still/concept media found.");
+      return;
+    }
+
+    setGridExportBusy(true);
+    setGridExportMessage(null);
+    try {
+      const response = await electron.runPythonCommand(
+        "export_fcp7_shots",
+        {
+          sceneName: activeScene.name,
+          sceneDir,
+          outputPath,
+          fps: projectFrameRate,
+          items,
+        },
+        { timeoutMs: 120000 },
+      );
+      if (!response.ok) {
+        setGridExportMessage(`FCP7 export failed: ${response.error.message}`);
+        return;
+      }
+      const finalPath = typeof response.data?.outputPath === "string" ? response.data.outputPath : outputPath;
+      const exportedCount = typeof response.data?.count === "number" ? response.data.count : items.length;
+      setGridExportMessage(`FCP7 export completed (${exportedCount} shots).`);
+      await electron.revealInFileManager(finalPath);
+    } catch (error) {
+      setGridExportMessage(`FCP7 export failed: ${toErrorMessage(error)}`);
+    } finally {
+      setGridExportBusy(false);
+    }
+  }, [activeScene, gridExportBusy, projectFrameRate, resolveFcp7Media, scenesRoot, shots]);
+
   return {
     exportDialogOpen,
     exportColumnsText,
@@ -181,5 +246,6 @@ export function useShotsExport<TShot>({
     openExportDialog,
     closeExportDialog,
     exportSceneGrid,
+    exportSceneFcp7,
   };
 }

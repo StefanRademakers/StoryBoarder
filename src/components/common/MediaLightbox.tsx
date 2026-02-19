@@ -69,6 +69,28 @@ export function MediaLightbox({
         onClick={(event) => event.stopPropagation()}
         onContextMenu={onContextMenu}
       >
+        <div className="moodboard-preview__controls" onClick={(event) => event.stopPropagation()}>
+          {onReveal ? (
+            <button
+              type="button"
+              className="moodboard-preview__icon-button"
+              onClick={onReveal}
+              aria-label="Open folder"
+              title="Open folder"
+            >
+              <img src="icons/folder.png" alt="" aria-hidden />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="moodboard-preview__icon-button"
+            onClick={onClose}
+            aria-label="Close preview"
+            title="Close"
+          >
+            <img src="icons/close.png" alt="" aria-hidden />
+          </button>
+        </div>
         {isVideo ? (
           <video src={toFileUrl(path)} controls autoPlay playsInline />
         ) : (

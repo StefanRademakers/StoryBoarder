@@ -11,6 +11,7 @@ interface ShotVersionsModalProps {
   modeAssets: ShotModeAsset[];
   versionMediaItems: Array<MediaItem & ShotModeAsset>;
   onClose: () => void;
+  onRevealFolder?: () => void;
   onOpenPreview: (index: number) => void;
   onOpenVersionMenu: (event: MouseEvent, asset: ShotModeAsset) => void;
   onSetFavorite: (asset: ShotModeAsset) => void;
@@ -24,6 +25,7 @@ export function ShotVersionsModal({
   modeAssets,
   versionMediaItems,
   onClose,
+  onRevealFolder,
   onOpenPreview,
   onOpenVersionMenu,
   onSetFavorite,
@@ -33,14 +35,36 @@ export function ShotVersionsModal({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal shot-versions-modal" onClick={(event) => event.stopPropagation()}>
+      <div
+        className={`modal shot-versions-modal${displayMode === "clip" ? " shot-versions-modal--clip" : ""}`}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="modal__header">
           <h3 className="modal__title">
             {capitalizeMode(displayMode)} Versions
           </h3>
-          <button type="button" className="pill-button" onClick={onClose}>
-            Close
-          </button>
+          <div className="shot-versions-modal__header-actions">
+            {onRevealFolder ? (
+              <button
+                type="button"
+                className="shot-versions-modal__icon-button"
+                onClick={onRevealFolder}
+                aria-label="Open folder"
+                title="Open folder"
+              >
+                <img src="icons/folder.png" alt="" aria-hidden />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="shot-versions-modal__icon-button"
+              onClick={onClose}
+              aria-label="Close versions"
+              title="Close"
+            >
+              <img src="icons/close.png" alt="" aria-hidden />
+            </button>
+          </div>
         </div>
         {modeAssetsLoading ? <p className="muted">Loading versions...</p> : null}
         {!modeAssetsLoading && !modeAssets.length ? <p className="muted">No versions yet in this mode.</p> : null}
@@ -49,7 +73,9 @@ export function ShotVersionsModal({
             items={versionMediaItems}
             className="moodboard-grid shot-versions-grid"
             getKey={(item) => item.path}
-            getTileClassName={(item) => `moodboard-tile${item.isFavorite ? " moodboard-tile--favorite" : ""}`}
+            getTileClassName={(item) =>
+              `moodboard-tile${item.isFavorite ? " moodboard-tile--favorite" : ""}${item.kind === "video" ? " moodboard-tile--video" : ""}`
+            }
             onOpen={(_item, idx) => onOpenPreview(idx)}
             onContextMenu={(event, item) => onOpenVersionMenu(event, item)}
             renderActions={(asset) => (

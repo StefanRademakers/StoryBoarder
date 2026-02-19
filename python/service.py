@@ -5,6 +5,7 @@ import logging
 import sys
 
 from actions.action_image_grid import create_image_grid
+from actions.export_fcp7_shots import export_fcp7_shots
 
 LOGGER = logging.getLogger("storybuilder.service")
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s", stream=sys.stderr)
@@ -49,9 +50,14 @@ def handle_create_image_grid(payload: dict) -> dict:
     return {"message": result}
 
 
+def handle_export_fcp7_shots(payload: dict) -> dict:
+    return export_fcp7_shots(payload)
+
+
 COMMANDS = {
     "ping": handle_ping,
     "create_image_grid": handle_create_image_grid,
+    "export_fcp7_shots": handle_export_fcp7_shots,
 }
 
 
