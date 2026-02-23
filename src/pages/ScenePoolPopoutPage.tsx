@@ -6,7 +6,7 @@ import { useAppState } from "../state/appState";
 import { MediaTileGrid } from "../components/common/MediaTileGrid";
 import { MediaLightbox } from "../components/common/MediaLightbox";
 import { MediaContextMenu } from "../components/common/MediaContextMenu";
-import type { MediaItem } from "../components/common/mediaTypes";
+import { inferMediaKind, type MediaItem } from "../components/common/mediaTypes";
 
 interface ScenePoolPopoutPageProps {
   project: ProjectState;
@@ -43,7 +43,7 @@ export function ScenePoolPopoutPage({ project, sceneId, title }: ScenePoolPopout
   const previewAsset = previewIndex === null ? null : assets[previewIndex] ?? null;
 
   const mediaItems = useMemo<Array<MediaItem & ScenePoolAsset>>(
-    () => assets.map((asset) => ({ ...asset, id: asset.path, kind: "image" as const })),
+    () => assets.map((asset) => ({ ...asset, id: asset.path, kind: inferMediaKind(asset.path) })),
     [assets],
   );
 
@@ -82,7 +82,7 @@ export function ScenePoolPopoutPage({ project, sceneId, title }: ScenePoolPopout
           if (!boardExists) continue;
           const entries = await electron.listDir(boardDir);
           for (const entry of entries) {
-            if (!entry.isFile || !isImageFile(entry.name)) continue;
+            if (!entry.isFile || !isPoolMediaFile(entry.name)) continue;
             const filePath = joinPath(boardDir, entry.name);
             const stat = await electron.stat(filePath);
             rows.push({
@@ -133,7 +133,7 @@ export function ScenePoolPopoutPage({ project, sceneId, title }: ScenePoolPopout
           <h2 className="modal__title">{title || `${sceneName} - Pool`}</h2>
         </div>
         {loading ? <p className="muted">Loading scene pool...</p> : null}
-        {!loading && !assets.length ? <p className="muted">No images found for this scene pool.</p> : null}
+        {!loading && !assets.length ? <p className="muted">No media found for this scene pool.</p> : null}
         {!loading && assets.length ? (
           <MediaTileGrid
             items={mediaItems}
@@ -149,7 +149,7 @@ export function ScenePoolPopoutPage({ project, sceneId, title }: ScenePoolPopout
       <MediaLightbox
         open={Boolean(previewAsset)}
         path={previewAsset?.path ?? null}
-        isVideo={false}
+        isVideo={previewAsset ? inferMediaKind(previewAsset.path) === "video" : false}
         name={previewAsset?.name}
         meta={previewAsset?.source}
         onClose={() => setPreviewIndex(null)}
@@ -168,7 +168,7 @@ export function ScenePoolPopoutPage({ project, sceneId, title }: ScenePoolPopout
           });
         }}
         onCopy={() => {
-          if (!previewAsset) return;
+          if (!previewAsset || inferMediaKind(previewAsset.path) === "video") return;
           void electron.copyImageToClipboard(previewAsset.path);
         }}
         onReveal={() => {
@@ -189,7 +189,7 @@ export function ScenePoolPopoutPage({ project, sceneId, title }: ScenePoolPopout
           {
             key: "open-ps",
             label: "Open in Photoshop",
-            visible: Boolean(menuAsset),
+            visible: Boolean(menuAsset && inferMediaKind(menuAsset.path) !== "video"),
             onSelect: async () => {
               if (!menuAsset) return;
               const configuredPath = appSettings.photoshopPath.trim();
@@ -201,7 +201,7 @@ export function ScenePoolPopoutPage({ project, sceneId, title }: ScenePoolPopout
           {
             key: "copy",
             label: "Copy to Clipboard",
-            visible: Boolean(menuAsset),
+            visible: Boolean(menuAsset && inferMediaKind(menuAsset.path) !== "video"),
             onSelect: async () => {
               if (!menuAsset) return;
               await electron.copyImageToClipboard(menuAsset.path);
@@ -239,9 +239,20 @@ function normalizeBoardRefs(value: unknown): string[] {
   return out;
 }
 
-function isImageFile(name: string): boolean {
+function isPoolMediaFile(name: string): boolean {
   const lower = name.toLowerCase();
-  return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp");
+  return (
+    lower.endsWith(".png")
+    || lower.endsWith(".jpg")
+    || lower.endsWith(".jpeg")
+    || lower.endsWith(".webp")
+    || lower.endsWith(".mp4")
+    || lower.endsWith(".mov")
+    || lower.endsWith(".webm")
+    || lower.endsWith(".mkv")
+    || lower.endsWith(".avi")
+    || lower.endsWith(".m4v")
+  );
 }
 
 function isMacPlatform(): boolean {

@@ -144,6 +144,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
   const [candidatePreviewIndex, setCandidatePreviewIndex] = useState<number | null>(null);
   const [candidateMenuAsset, setCandidateMenuAsset] = useState<CandidateAsset | null>(null);
   const [candidateMenuPos, setCandidateMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [assetRefreshTokens, setAssetRefreshTokens] = useState<Record<string, number>>({});
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shotItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const scenesRef = useRef<SceneMeta[]>([]);
@@ -175,7 +176,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
     [modeAssets],
   );
   const poolMediaItems = useMemo<Array<MediaItem & ScenePoolAsset>>(
-    () => poolAssets.map((asset) => ({ ...asset, id: asset.path, kind: "image" as const })),
+    () => poolAssets.map((asset) => ({ ...asset, id: asset.path, kind: inferMediaKind(asset.path) })),
     [poolAssets],
   );
   const candidateMediaItems = useMemo<Array<MediaItem & CandidateAsset>>(
@@ -701,12 +702,30 @@ export function ShotsPage({ project }: ShotsPageProps) {
       if (event.key.toLowerCase() === "n") {
         event.preventDefault();
         void createShot({ afterSelected: true });
+        return;
+      }
+
+      if (event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        if (displayModeRef.current === "clip") return;
+        const sceneId = activeSceneIdRef.current;
+        const shotId = activeShotIdRef.current;
+        if (!sceneId || !shotId) return;
+        const shot = shotsRef.current.find((item) => item.id === shotId);
+        if (!shot) return;
+        const relative = getPlayableRelative(shot, displayModeRef.current);
+        if (!relative) return;
+        const absolutePath = joinPath(joinPath(scenesRoot, sceneId), relative);
+        setAssetRefreshTokens((current) => ({
+          ...current,
+          [absolutePath]: Date.now(),
+        }));
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [createShot, navigateShotTimeline]);
+  }, [createShot, navigateShotTimeline, scenesRoot]);
 
   const requestDeleteShot = (shot: ShotItem) => {
     setConfirmTarget(shot);
@@ -1300,6 +1319,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
               onBrowseShotMedia={browseShotMedia}
               onOpenVersionsBrowser={openVersionsBrowser}
               onUpdateShot={updateShot}
+              getAssetCacheToken={(assetPath) => assetRefreshTokens[assetPath]}
             />
           </>
         )}

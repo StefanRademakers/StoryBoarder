@@ -194,7 +194,7 @@ export function ShotsContextMenus({
           {
             key: "open-ps",
             label: "Open in Photoshop",
-            visible: Boolean(poolMenuAsset),
+            visible: Boolean(poolMenuAsset && inferMediaKind(poolMenuAsset.path) !== "video"),
             onSelect: async () => {
               await onOpenPoolAssetInPhotoshop();
             },
@@ -202,7 +202,7 @@ export function ShotsContextMenus({
           {
             key: "copy",
             label: "Copy to Clipboard",
-            visible: Boolean(poolMenuAsset),
+            visible: Boolean(poolMenuAsset && inferMediaKind(poolMenuAsset.path) !== "video"),
             onSelect: async () => {
               await onCopyPoolAssetToClipboard();
             },

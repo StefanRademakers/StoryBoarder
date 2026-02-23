@@ -1,0 +1,207 @@
+<?xml version='1.0' encoding='utf-8'?>
+<xmeml version="5">
+  <sequence id="sequence-1">
+    <name>thuis Shots</name>
+    <duration>288</duration>
+    <rate>
+      <timebase>24</timebase>
+      <ntsc>FALSE</ntsc>
+    </rate>
+    <in>-1</in>
+    <out>-1</out>
+    <timecode>
+      <string>01:00:00:00</string>
+      <frame>86400</frame>
+      <displayformat>NDF</displayformat>
+      <rate>
+        <timebase>24</timebase>
+        <ntsc>FALSE</ntsc>
+      </rate>
+    </timecode>
+    <media>
+      <video>
+        <track>
+          <clipitem id="clipitem-1">
+            <name>SHOT 001 - Ref dak overkant 2.png</name>
+            <duration>48</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>0</start>
+            <end>48</end>
+            <enabled>TRUE</enabled>
+            <in>0</in>
+            <out>48</out>
+            <file id="file-1">
+              <name>Ref dak overkant 2.png</name>
+              <pathurl>file://localhost/D:/Storyboards/wolven/scenes/scene-thuis-db75455b92fa48cfbd8506eab86c6db6/shots/shot-1771334732071/still/Ref%20dak%20overkant%202.png</pathurl>
+              <rate>
+                <timebase>24</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <duration>48</duration>
+              <media>
+                <video />
+              </media>
+            </file>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+          </clipitem>
+          <clipitem id="clipitem-2">
+            <name>SHOT 002 - j_scene2.mp4</name>
+            <duration>48</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>48</start>
+            <end>96</end>
+            <enabled>TRUE</enabled>
+            <in>0</in>
+            <out>48</out>
+            <file id="file-2">
+              <name>j_scene2.mp4</name>
+              <pathurl>file://localhost/D:/Storyboards/wolven/scenes/scene-thuis-db75455b92fa48cfbd8506eab86c6db6/shots/shot-1771334739860/clip/j_scene2.mp4</pathurl>
+              <rate>
+                <timebase>24</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <duration>48</duration>
+              <media>
+                <video />
+              </media>
+            </file>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+          </clipitem>
+          <clipitem id="clipitem-3">
+            <name>SHOT 003 - h_scene3.mp4</name>
+            <duration>48</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>96</start>
+            <end>144</end>
+            <enabled>TRUE</enabled>
+            <in>0</in>
+            <out>48</out>
+            <file id="file-3">
+              <name>h_scene3.mp4</name>
+              <pathurl>file://localhost/D:/Storyboards/wolven/scenes/scene-thuis-db75455b92fa48cfbd8506eab86c6db6/shots/shot-1771334744337/clip/h_scene3.mp4</pathurl>
+              <rate>
+                <timebase>24</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <duration>48</duration>
+              <media>
+                <video />
+              </media>
+            </file>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+          </clipitem>
+          <clipitem id="clipitem-4">
+            <name>SHOT 004 - i_scene4.mp4</name>
+            <duration>48</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>144</start>
+            <end>192</end>
+            <enabled>TRUE</enabled>
+            <in>0</in>
+            <out>48</out>
+            <file id="file-4">
+              <name>i_scene4.mp4</name>
+              <pathurl>file://localhost/D:/Storyboards/wolven/scenes/scene-thuis-db75455b92fa48cfbd8506eab86c6db6/shots/shot-1771334749039/clip/i_scene4.mp4</pathurl>
+              <rate>
+                <timebase>24</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <duration>48</duration>
+              <media>
+                <video />
+              </media>
+            </file>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+          </clipitem>
+          <clipitem id="clipitem-5">
+            <name>SHOT 005 - walk_to_window.mp4</name>
+            <duration>48</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>192</start>
+            <end>240</end>
+            <enabled>TRUE</enabled>
+            <in>0</in>
+            <out>48</out>
+            <file id="file-5">
+              <name>walk_to_window.mp4</name>
+              <pathurl>file://localhost/D:/Storyboards/wolven/scenes/scene-thuis-db75455b92fa48cfbd8506eab86c6db6/shots/shot-1771334753651/clip/walk_to_window.mp4</pathurl>
+              <rate>
+                <timebase>24</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <duration>48</duration>
+              <media>
+                <video />
+              </media>
+            </file>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+          </clipitem>
+          <clipitem id="clipitem-6">
+            <name>SHOT 006 - e_scene6.mp4</name>
+            <duration>48</duration>
+            <rate>
+              <timebase>24</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>240</start>
+            <end>288</end>
+            <enabled>TRUE</enabled>
+            <in>0</in>
+            <out>48</out>
+            <file id="file-6">
+              <name>e_scene6.mp4</name>
+              <pathurl>file://localhost/D:/Storyboards/wolven/scenes/scene-thuis-db75455b92fa48cfbd8506eab86c6db6/shots/shot-1771334758269/clip/e_scene6.mp4</pathurl>
+              <rate>
+                <timebase>24</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <duration>48</duration>
+              <media>
+                <video />
+              </media>
+            </file>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+          </clipitem>
+          <enabled>TRUE</enabled>
+          <locked>FALSE</locked>
+        </track>
+      </video>
+      <audio>
+        <track />
+      </audio>
+    </media>
+  </sequence>
+</xmeml>

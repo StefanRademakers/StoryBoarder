@@ -91,11 +91,13 @@ export function MediaLightbox({
             <img src="icons/close.png" alt="" aria-hidden />
           </button>
         </div>
-        {isVideo ? (
-          <video src={toFileUrl(path)} controls autoPlay playsInline />
-        ) : (
-          <img src={toFileUrl(path)} alt="" />
-        )}
+        <div className="moodboard-preview__media">
+          {isVideo ? (
+            <video src={toFileUrl(path)} controls autoPlay playsInline />
+          ) : (
+            <img src={toFileUrl(path)} alt="" />
+          )}
+        </div>
         {(name || meta) ? (
           <div className="moodboard-preview__name">
             {name ?? ""}

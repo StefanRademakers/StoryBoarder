@@ -93,7 +93,7 @@ export function ShotsLightboxes({
       <MediaLightbox
         open={Boolean(poolPreviewAsset)}
         path={poolPreviewAsset?.path ?? null}
-        isVideo={false}
+        isVideo={poolPreviewAsset ? inferMediaKind(poolPreviewAsset.path) === "video" : false}
         name={poolPreviewAsset?.name}
         meta={poolPreviewAsset?.source}
         onClose={() => onSetPoolPreviewIndex(() => null)}
@@ -112,7 +112,7 @@ export function ShotsLightboxes({
           });
         }}
         onCopy={() => {
-          if (!poolPreviewAsset) return;
+          if (!poolPreviewAsset || inferMediaKind(poolPreviewAsset.path) === "video") return;
           onCopyImageToClipboard(poolPreviewAsset.path);
         }}
         onReveal={() => {

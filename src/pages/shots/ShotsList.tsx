@@ -41,6 +41,7 @@ interface ShotsListProps {
   onBrowseShotMedia: (options?: { shotId?: string; mode?: ShotDisplayMode }) => Promise<void>;
   onOpenVersionsBrowser: (shotId: string) => void;
   onUpdateShot: (shotId: string, updater: (shot: ShotListItem) => ShotListItem) => Promise<void>;
+  getAssetCacheToken?: (assetPath: string) => number | undefined;
 }
 
 const ANGLE_SUGGESTIONS: SuggestionItem[] = [
@@ -135,6 +136,7 @@ export function ShotsList({
   onBrowseShotMedia,
   onOpenVersionsBrowser,
   onUpdateShot,
+  getAssetCacheToken,
 }: ShotsListProps) {
   const [activeSuggestion, setActiveSuggestion] = useState<{ shotId: string; field: SuggestionFieldKey } | null>(null);
 
@@ -225,6 +227,10 @@ export function ShotsList({
         {shots.map((shot, idx) => {
           const preview = (shot.description || "").replace(/\s+/g, " ").trim();
           const assetAbsolute = getShotAssetPath(shot);
+          const cacheToken = assetAbsolute ? getAssetCacheToken?.(assetAbsolute) : undefined;
+          const assetSrc = assetAbsolute
+            ? `${toFileUrl(assetAbsolute)}${cacheToken ? `?v=${cacheToken}` : ""}`
+            : "";
           const isActive = shot.id === activeShotId;
           const shotNumber = String(idx + 1).padStart(2, "0");
           const descriptionActionValue = shot.description.trim()
@@ -275,9 +281,9 @@ export function ShotsList({
                 <div className="shots-row__image">
                   {assetAbsolute ? (
                     displayMode === "clip" ? (
-                      <video src={toFileUrl(assetAbsolute)} muted playsInline preload="metadata" />
+                      <video src={assetSrc} muted playsInline preload="metadata" />
                     ) : (
-                      <img src={toFileUrl(assetAbsolute)} alt="" />
+                      <img src={assetSrc} alt="" />
                     )
                   ) : (
                     <span className="muted">{displayMode === "clip" ? "Clip" : "Image"}</span>
@@ -321,9 +327,9 @@ export function ShotsList({
                             }}
                           >
                             {displayMode === "clip" ? (
-                              <video src={toFileUrl(assetAbsolute)} controls preload="metadata" />
+                              <video src={assetSrc} controls preload="metadata" />
                             ) : (
-                              <img src={toFileUrl(assetAbsolute)} alt="Shot" />
+                              <img src={assetSrc} alt="Shot" />
                             )}
                           </div>
                         ) : (

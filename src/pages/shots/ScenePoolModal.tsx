@@ -33,9 +33,9 @@ export function ScenePoolModal({
             Close
           </button>
         </div>
-        {loading ? <p className="muted">Loading pool images...</p> : null}
+        {loading ? <p className="muted">Loading pool media...</p> : null}
         {!loading && !assets.length ? (
-          <p className="muted">No images found in this scene&apos;s referenced Character/Props and Moodboards.</p>
+          <p className="muted">No media found in this scene&apos;s referenced Character/Props and Moodboards.</p>
         ) : null}
         {!loading && assets.length ? (
           <MediaTileGrid

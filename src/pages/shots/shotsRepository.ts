@@ -1,6 +1,14 @@
 import { electron } from "../../services/electron";
 import { joinPath } from "../../utils/path";
-import { fileExtension, getBaseName, isImageFile, normalizeBoardRefs, sanitizeFileName, uniqueFileName } from "./utils";
+import {
+  fileExtension,
+  getBaseName,
+  isImageFile,
+  isVideoExtension,
+  normalizeBoardRefs,
+  sanitizeFileName,
+  uniqueFileName,
+} from "./utils";
 import type { CandidateTab, CandidateAsset, ScenePoolAsset, ShotDisplayMode } from "./types";
 
 export interface SceneMetaRecord {
@@ -123,7 +131,9 @@ export async function listScenePoolAssets(
     const entries = await electron.listDir(boardDir);
     for (const entry of entries) {
       if (!entry.isFile) continue;
-      if (!isImageFile(entry.name)) continue;
+      const ext = fileExtension(entry.name);
+      const isVideo = ext ? isVideoExtension(ext) : false;
+      if (!isImageFile(entry.name) && !isVideo) continue;
       const filePath = joinPath(boardDir, entry.name);
       const stat = await electron.stat(filePath);
       rows.push({

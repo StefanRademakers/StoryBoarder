@@ -97,13 +97,11 @@ export function useShotsExport<TShot>({
     }
     const maxLongestEdge = parsePositiveInteger(exportMaxLongestEdgeText) ?? 2024;
     const modeName = mode === "concept" ? "concept_board" : mode === "reference" ? "reference_board" : "still_board";
-    const defaultName = `${modeName}_${activeScene.name.replace(/[\\/:*?"<>|]+/g, "_")}.png`;
-    const pickedFile = await electron.pickSaveFile({
-      title: "Save grid export",
-      defaultPath: joinPath(joinPath(scenesRoot, activeScene.id), defaultName),
-      filters: [{ name: "PNG Image", extensions: ["png"] }],
-    });
-    if (!pickedFile) return;
+    const sceneDir = joinPath(scenesRoot, activeScene.id);
+    const exportDir = joinPath(sceneDir, "export");
+    const safeSceneName = sanitizeFileName(activeScene.name) || activeScene.id;
+    const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "_");
+    const outputPath = joinPath(exportDir, `${modeName}_${safeSceneName}_${timestamp}.png`);
     const items = exportShots.map((shot, idx) => {
       const absolute = resolveShotAssetPath(shot, mode);
       const shotNumber = startIndex + idx;
@@ -116,7 +114,7 @@ export function useShotsExport<TShot>({
     setGridExportBusy(true);
     setGridExportMessage(null);
     try {
-      const expectedOutputPath = pickedFile.toLowerCase().endsWith(".png") ? pickedFile : `${pickedFile}.png`;
+      await electron.ensureDir(exportDir);
       const response = await electron.runPythonCommand(
         "create_image_grid",
         {
@@ -133,7 +131,7 @@ export function useShotsExport<TShot>({
             backgroundColor: "#ffffff",
             resizeToMaxLongestEdge: exportResizeEnabled,
             maxLongestEdge,
-            outputPath: pickedFile,
+            outputPath,
           },
         },
         { timeoutMs: 120000 },
@@ -146,7 +144,8 @@ export function useShotsExport<TShot>({
         ? response.data.message
         : "Grid export completed.";
       setGridExportMessage(message);
-      await electron.revealInFileManager(expectedOutputPath);
+      const finalPath = typeof response.data?.outputPath === "string" ? response.data.outputPath : outputPath;
+      await electron.revealInFileManager(finalPath);
       setExportDialogOpen(false);
     } catch (error) {
       setGridExportMessage(`Export failed: ${toErrorMessage(error)}`);
@@ -210,6 +209,8 @@ export function useShotsExport<TShot>({
           sceneDir,
           outputPath,
           fps: projectFrameRate,
+          width: projectWidth,
+          height: projectHeight,
           items,
         },
         { timeoutMs: 120000 },
@@ -227,7 +228,7 @@ export function useShotsExport<TShot>({
     } finally {
       setGridExportBusy(false);
     }
-  }, [activeScene, gridExportBusy, projectFrameRate, resolveFcp7Media, scenesRoot, shots]);
+  }, [activeScene, gridExportBusy, projectFrameRate, projectHeight, projectWidth, resolveFcp7Media, scenesRoot, shots]);
 
   return {
     exportDialogOpen,
