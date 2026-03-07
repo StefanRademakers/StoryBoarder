@@ -1,4 +1,4 @@
-export type ShotDisplayMode = "concept" | "reference" | "still" | "clip";
+export type ShotDisplayMode = "concept" | "reference" | "still" | "clip" | "performance";
 export type CandidateTab = "stills" | "clips";
 export type PlaybackMediaKind = "video" | "image" | "placeholder";
 

@@ -18,10 +18,12 @@ interface ShotItemLike {
   favoriteReference?: string;
   favoriteStill?: string;
   favoriteClip?: string;
+  favoritePerformance?: string;
   conceptAssets?: string[];
   referenceAssets?: string[];
   stillAssets?: string[];
   clipAssets?: string[];
+  performanceAssets?: string[];
 }
 
 interface ShotsIndexLike<TShot extends ShotItemLike> {

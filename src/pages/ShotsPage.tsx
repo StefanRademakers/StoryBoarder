@@ -76,10 +76,12 @@ interface ShotItem {
   favoriteReference?: string;
   favoriteStill?: string;
   favoriteClip?: string;
+  favoritePerformance?: string;
   conceptAssets?: string[];
   referenceAssets?: string[];
   stillAssets?: string[];
   clipAssets?: string[];
+  performanceAssets?: string[];
   durationSeconds?: number | null;
   angle?: string;
   shotSize?: string;
@@ -204,6 +206,11 @@ export function ShotsPage({ project }: ShotsPageProps) {
       icon: <img src="icons/clip.png" width={16} height={16} alt="" aria-hidden />,
     },
     {
+      value: "performance",
+      label: "Performance",
+      icon: <img src="icons/clip.png" width={16} height={16} alt="" aria-hidden />,
+    },
+    {
       value: "reference",
       label: "Reference",
       icon: <img src="icons/still.png" width={16} height={16} alt="" aria-hidden />,
@@ -233,6 +240,9 @@ export function ShotsPage({ project }: ShotsPageProps) {
     if (mode === "clip") {
       return shot.favoriteClip ?? "";
     }
+    if (mode === "performance") {
+      return shot.favoritePerformance ?? "";
+    }
     return shot.favoriteStill ?? "";
   };
 
@@ -246,6 +256,9 @@ export function ShotsPage({ project }: ShotsPageProps) {
     if (mode === "clip") {
       return { ...shot, favoriteClip: relative };
     }
+    if (mode === "performance") {
+      return { ...shot, favoritePerformance: relative };
+    }
     return { ...shot, favoriteStill: relative };
   };
 
@@ -258,6 +271,9 @@ export function ShotsPage({ project }: ShotsPageProps) {
     }
     if (mode === "clip") {
       return shot.clipAssets ?? [];
+    }
+    if (mode === "performance") {
+      return shot.performanceAssets ?? [];
     }
     return shot.stillAssets ?? [];
   };
@@ -289,6 +305,9 @@ export function ShotsPage({ project }: ShotsPageProps) {
     }
     if (mode === "clip") {
       return { ...shot, clipAssets: cleaned };
+    }
+    if (mode === "performance") {
+      return { ...shot, performanceAssets: cleaned };
     }
     return { ...shot, stillAssets: cleaned };
   };
@@ -643,10 +662,12 @@ export function ShotsPage({ project }: ShotsPageProps) {
       favoriteReference: "",
       favoriteStill: "",
       favoriteClip: "",
+      favoritePerformance: "",
       conceptAssets: [],
       referenceAssets: [],
       stillAssets: [],
       clipAssets: [],
+      performanceAssets: [],
       durationSeconds: 2,
       angle: "",
       shotSize: "",
@@ -683,6 +704,12 @@ export function ShotsPage({ project }: ShotsPageProps) {
         return;
       }
 
+      if (event.key === "F5") {
+        event.preventDefault();
+        setDisplayMode("performance");
+        return;
+      }
+
       if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) {
         return;
       }
@@ -707,7 +734,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
       if (event.key.toLowerCase() === "r") {
         event.preventDefault();
-        if (displayModeRef.current === "clip") return;
+        if (displayModeRef.current === "clip" || displayModeRef.current === "performance") return;
         const sceneId = activeSceneIdRef.current;
         const shotId = activeShotIdRef.current;
         if (!sceneId || !shotId) return;
@@ -789,9 +816,10 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
   const browseShotMedia = async (options?: { shotId?: string; mode?: ShotDisplayMode }) => {
     const mode = options?.mode ?? displayModeRef.current;
+    const isVideoMode = mode === "clip" || mode === "performance";
     const picked = await window.electronAPI.pickFile({
-      title: mode === "clip" ? "Select shot clip" : "Select shot image",
-      filters: mode === "clip"
+      title: mode === "performance" ? "Select performance clip" : (mode === "clip" ? "Select shot clip" : "Select shot image"),
+      filters: isVideoMode
         ? [{ name: "Videos", extensions: [...VIDEO_EXTENSIONS] }]
         : [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
     });
@@ -896,7 +924,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       if (!activeSceneIdRef.current || !activeShotIdRef.current) return;
-      if (displayModeRef.current === "clip") return;
+      if (displayModeRef.current === "clip" || displayModeRef.current === "performance") return;
       if (isEditableTarget(event.target)) return;
       if (!event.clipboardData) return;
 
@@ -957,7 +985,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
   const resolveShotAssetPathForFcp7 = (shot: ShotItem): { path: string; mediaType: "video" | "image"; durationSeconds?: number | null } | null => {
     if (!sceneDir) return null;
-    const pickRelative = (mode: "clip" | "still" | "concept"): string | null => {
+    const pickRelative = (mode: "clip" | "performance" | "still" | "concept"): string | null => {
       const favorite = getFavoriteRelative(shot, mode).replace(/\\/g, "/").trim();
       if (favorite && isFileAllowedForMode(favorite, mode)) {
         return favorite;
@@ -972,7 +1000,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
       return null;
     };
 
-    const relative = pickRelative("clip") ?? pickRelative("still") ?? pickRelative("concept");
+    const relative = pickRelative("clip") ?? pickRelative("performance") ?? pickRelative("still") ?? pickRelative("concept");
     if (!relative) return null;
     const ext = fileExtension(relative);
     const mediaType = ext && isVideoExtension(ext) ? "video" : "image";
@@ -981,6 +1009,12 @@ export function ShotsPage({ project }: ShotsPageProps) {
       mediaType,
       durationSeconds: shot.durationSeconds ?? null,
     };
+  };
+  const resolveFavoriteClipPathForExport = (shot: ShotItem): string => {
+    if (!sceneDir) return "";
+    const relative = getFavoriteRelative(shot, "clip").replace(/\\/g, "/").trim();
+    if (!relative || !isFileAllowedForMode(relative, "clip")) return "";
+    return joinPath(sceneDir, relative);
   };
   const {
     playbackOpen,
@@ -1014,6 +1048,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
     closeExportDialog,
     exportSceneGrid,
     exportSceneFcp7,
+    exportSceneClips,
   } = useShotsExport({
     activeScene: activeScene ? { id: activeScene.id, name: activeScene.name } : null,
     shots,
@@ -1024,6 +1059,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
     projectHeight,
     resolveShotAssetPath: (shot, mode) => shotAssetPath(shot, mode),
     resolveFcp7Media: resolveShotAssetPathForFcp7,
+    resolveFavoriteClipPath: resolveFavoriteClipPathForExport,
   });
   const {
     createShot: createShotCrud,
@@ -1047,7 +1083,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
   const menuShot = shots.find((shot) => shot.id === imageMenuShotId) ?? null;
   const menuShotAssetPath = menuShot ? shotAssetPath(menuShot) : "";
-  const modeIsImage = displayMode !== "clip";
+  const modeIsImage = displayMode !== "clip" && displayMode !== "performance";
   const canCreateEmptyConcept = displayMode === "concept" && !!menuShot;
   const revealLabel = isMacPlatform() ? "Reveal in Finder" : "Reveal in Explorer";
 
@@ -1147,7 +1183,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
   const openVersionAssetInPhotoshop = async () => {
     if (!versionMenuAsset) return;
-    if (displayMode === "clip") return;
+    if (displayMode === "clip" || displayMode === "performance") return;
     const configuredPath = appSettings.photoshopPath.trim();
     if (!configuredPath) return;
     await electron.openWithApp(configuredPath, versionMenuAsset.path);
@@ -1156,7 +1192,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
 
   const copyVersionAssetToClipboard = async () => {
     if (!versionMenuAsset) return;
-    if (displayMode === "clip") return;
+    if (displayMode === "clip" || displayMode === "performance") return;
     await electron.copyImageToClipboard(versionMenuAsset.path);
     closeVersionMenu();
   };
@@ -1295,6 +1331,9 @@ export function ShotsPage({ project }: ShotsPageProps) {
               onOpenExport={openExportDialog}
               onExportFcp7={() => {
                 void exportSceneFcp7();
+              }}
+              onExportClips={() => {
+                void exportSceneClips();
               }}
               onDisplayModeChange={setDisplayMode}
             />

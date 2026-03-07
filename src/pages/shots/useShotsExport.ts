@@ -19,6 +19,7 @@ interface UseShotsExportParams<TShot> {
   projectHeight: number;
   resolveShotAssetPath: (shot: TShot, mode: "concept" | "reference" | "still") => string;
   resolveFcp7Media: (shot: TShot) => { path: string; mediaType: "video" | "image"; durationSeconds?: number | null } | null;
+  resolveFavoriteClipPath: (shot: TShot) => string;
 }
 
 interface UseShotsExportResult {
@@ -39,6 +40,18 @@ interface UseShotsExportResult {
   closeExportDialog: () => void;
   exportSceneGrid: () => Promise<void>;
   exportSceneFcp7: () => Promise<void>;
+  exportSceneClips: () => Promise<void>;
+}
+
+function fileExtension(value: string): string {
+  const normalized = value.replace(/\\/g, "/");
+  const queryIndex = normalized.indexOf("?");
+  const cleaned = queryIndex >= 0 ? normalized.slice(0, queryIndex) : normalized;
+  const slashIndex = cleaned.lastIndexOf("/");
+  const fileName = slashIndex >= 0 ? cleaned.slice(slashIndex + 1) : cleaned;
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex === fileName.length - 1) return "";
+  return fileName.slice(dotIndex).toLowerCase();
 }
 
 export function useShotsExport<TShot>({
@@ -51,6 +64,7 @@ export function useShotsExport<TShot>({
   projectHeight,
   resolveShotAssetPath,
   resolveFcp7Media,
+  resolveFavoriteClipPath,
 }: UseShotsExportParams<TShot>): UseShotsExportResult {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportColumnsText, setExportColumnsText] = useState("2");
@@ -77,7 +91,7 @@ export function useShotsExport<TShot>({
 
   const exportSceneGrid = useCallback(async () => {
     if (!activeScene || !shots.length || gridExportBusy) return;
-    if (displayMode === "clip") {
+    if (displayMode === "clip" || displayMode === "performance") {
       setGridExportMessage("Export is only available in Concept, Reference, or Still mode.");
       return;
     }
@@ -230,6 +244,47 @@ export function useShotsExport<TShot>({
     }
   }, [activeScene, gridExportBusy, projectFrameRate, projectHeight, projectWidth, resolveFcp7Media, scenesRoot, shots]);
 
+  const exportSceneClips = useCallback(async () => {
+    if (!activeScene || !shots.length || gridExportBusy) return;
+
+    const sceneDir = joinPath(scenesRoot, activeScene.id);
+    const renderDir = joinPath(sceneDir, "render");
+    const copied: Array<{ from: string; to: string }> = [];
+
+    for (let idx = 0; idx < shots.length; idx += 1) {
+      const shot = shots[idx];
+      const sourcePath = resolveFavoriteClipPath(shot);
+      if (!sourcePath) continue;
+      if (!(await electron.exists(sourcePath))) continue;
+      const extension = fileExtension(sourcePath) || ".mp4";
+      const targetName = `clip_${String(idx + 1).padStart(3, "0")}${extension}`;
+      copied.push({
+        from: sourcePath,
+        to: joinPath(renderDir, targetName),
+      });
+    }
+
+    if (!copied.length) {
+      setGridExportMessage("Export Clips failed: no valid favorite clips found.");
+      return;
+    }
+
+    setGridExportBusy(true);
+    setGridExportMessage(null);
+    try {
+      await electron.ensureDir(renderDir);
+      for (const item of copied) {
+        await electron.copyFile(item.from, item.to);
+      }
+      setGridExportMessage(`Export Clips completed (${copied.length} clips).`);
+      await electron.revealInFileManager(renderDir);
+    } catch (error) {
+      setGridExportMessage(`Export Clips failed: ${toErrorMessage(error)}`);
+    } finally {
+      setGridExportBusy(false);
+    }
+  }, [activeScene, gridExportBusy, resolveFavoriteClipPath, scenesRoot, shots]);
+
   return {
     exportDialogOpen,
     exportColumnsText,
@@ -248,5 +303,6 @@ export function useShotsExport<TShot>({
     closeExportDialog,
     exportSceneGrid,
     exportSceneFcp7,
+    exportSceneClips,
   };
 }

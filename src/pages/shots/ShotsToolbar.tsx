@@ -14,6 +14,7 @@ interface ShotsToolbarProps {
   onOpenCandidates: () => void;
   onOpenExport: () => void;
   onExportFcp7: () => void;
+  onExportClips: () => void;
   onDisplayModeChange: (mode: ShotDisplayMode) => void;
 }
 
@@ -30,6 +31,7 @@ export function ShotsToolbar({
   onOpenCandidates,
   onOpenExport,
   onExportFcp7,
+  onExportClips,
   onDisplayModeChange,
 }: ShotsToolbarProps) {
   return (
@@ -69,6 +71,14 @@ export function ShotsToolbar({
             onClick={onExportFcp7}
           >
             Export FCP7
+          </button>
+          <button
+            type="button"
+            className="pill-button"
+            disabled={!hasShots || gridExportBusy}
+            onClick={onExportClips}
+          >
+            Export Clips
           </button>
         </div>
         <SegmentedControl

@@ -97,6 +97,8 @@ export function ShotsContextMenus({
             key: "replace",
             label: displayMode === "clip"
               ? (menuShotAssetPath ? "Replace clip" : "Add clip")
+              : displayMode === "performance"
+                ? (menuShotAssetPath ? "Replace performance clip" : "Add performance clip")
               : (menuShotAssetPath ? "Replace image" : "Add image"),
             visible: imageMenuHasShot,
             onSelect: async () => {
@@ -162,7 +164,7 @@ export function ShotsContextMenus({
           {
             key: "open-ps",
             label: "Open in Photoshop",
-            visible: Boolean(versionMenuAsset && displayMode !== "clip"),
+            visible: Boolean(versionMenuAsset && displayMode !== "clip" && displayMode !== "performance"),
             onSelect: async () => {
               await onOpenVersionAssetInPhotoshop();
             },
@@ -170,7 +172,7 @@ export function ShotsContextMenus({
           {
             key: "copy",
             label: "Copy to Clipboard",
-            visible: Boolean(versionMenuAsset && displayMode !== "clip"),
+            visible: Boolean(versionMenuAsset && displayMode !== "clip" && displayMode !== "performance"),
             onSelect: async () => {
               await onCopyVersionAssetToClipboard();
             },

@@ -1,6 +1,6 @@
 import { joinPath } from "../../utils/path";
 
-type ShotDisplayMode = "concept" | "reference" | "still" | "clip";
+type ShotDisplayMode = "concept" | "reference" | "still" | "clip" | "performance";
 
 interface ShotItem {
   id: string;
@@ -10,10 +10,12 @@ interface ShotItem {
   favoriteReference?: string;
   favoriteStill?: string;
   favoriteClip?: string;
+  favoritePerformance?: string;
   conceptAssets?: string[];
   referenceAssets?: string[];
   stillAssets?: string[];
   clipAssets?: string[];
+  performanceAssets?: string[];
   durationSeconds?: number | null;
   angle?: string;
   shotSize?: string;
@@ -32,7 +34,7 @@ interface ShotsIndex {
 
 export const VIDEO_EXTENSIONS = ["mp4", "mov", "webm", "mkv", "avi", "m4v"] as const;
 
-export const SHOT_MODES: ShotDisplayMode[] = ["concept", "reference", "still", "clip"];
+export const SHOT_MODES: ShotDisplayMode[] = ["concept", "reference", "still", "clip", "performance"];
 
 export function normalizeShotsIndex(index: ShotsIndex): ShotsIndex {
   return {
@@ -42,10 +44,12 @@ export function normalizeShotsIndex(index: ShotsIndex): ShotsIndex {
         const referenceAssets = normalizeAssetList(shot.referenceAssets);
         const stillAssets = normalizeAssetList(shot.stillAssets);
         const clipAssets = normalizeAssetList(shot.clipAssets);
+        const performanceAssets = normalizeAssetList(shot.performanceAssets);
         const favoriteConcept = typeof shot.favoriteConcept === "string" ? shot.favoriteConcept : "";
         const favoriteReference = typeof shot.favoriteReference === "string" ? shot.favoriteReference : "";
         const favoriteStill = typeof shot.favoriteStill === "string" ? shot.favoriteStill : "";
         const favoriteClip = typeof shot.favoriteClip === "string" ? shot.favoriteClip : "";
+        const favoritePerformance = typeof shot.favoritePerformance === "string" ? shot.favoritePerformance : "";
         return {
           id: shot.id,
           order: typeof shot.order === "number" ? shot.order : idx,
@@ -54,10 +58,12 @@ export function normalizeShotsIndex(index: ShotsIndex): ShotsIndex {
           favoriteReference: referenceAssets.includes(favoriteReference) ? favoriteReference : (referenceAssets[referenceAssets.length - 1] ?? ""),
           favoriteStill: stillAssets.includes(favoriteStill) ? favoriteStill : (stillAssets[stillAssets.length - 1] ?? ""),
           favoriteClip: clipAssets.includes(favoriteClip) ? favoriteClip : (clipAssets[clipAssets.length - 1] ?? ""),
+          favoritePerformance: performanceAssets.includes(favoritePerformance) ? favoritePerformance : (performanceAssets[performanceAssets.length - 1] ?? ""),
           conceptAssets,
           referenceAssets,
           stillAssets,
           clipAssets,
+          performanceAssets,
           durationSeconds: typeof shot.durationSeconds === "number" && Number.isFinite(shot.durationSeconds)
             ? shot.durationSeconds
             : 2,
@@ -117,11 +123,11 @@ export function imageExtensionFromName(value: string): string | null {
 export function isFileAllowedForMode(value: string, mode: ShotDisplayMode): boolean {
   const ext = fileExtension(value);
   if (!ext) return false;
-  if (mode === "clip") return isVideoExtension(ext);
+  if (mode === "clip" || mode === "performance") return isVideoExtension(ext);
   return imageExtensionFromName(value) !== null;
 }
 
-export function modeFolderName(mode: ShotDisplayMode): "concept" | "reference" | "still" | "clip" {
+export function modeFolderName(mode: ShotDisplayMode): "concept" | "reference" | "still" | "clip" | "performance" {
   return mode;
 }
 

@@ -24,6 +24,7 @@ function modeLabel(displayMode: ShotDisplayMode): string {
   if (displayMode === "concept") return "Concept";
   if (displayMode === "reference") return "Reference";
   if (displayMode === "still") return "Still";
+  if (displayMode === "performance") return "Performance (not supported)";
   return "Clip (not supported)";
 }
 

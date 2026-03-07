@@ -36,7 +36,7 @@ export function ShotVersionsModal({
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className={`modal shot-versions-modal${displayMode === "clip" ? " shot-versions-modal--clip" : ""}`}
+        className={`modal shot-versions-modal${displayMode === "clip" || displayMode === "performance" ? " shot-versions-modal--clip" : ""}`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal__header">

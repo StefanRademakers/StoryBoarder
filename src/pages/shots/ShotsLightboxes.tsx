@@ -81,7 +81,7 @@ export function ShotsLightboxes({
           onOpenVersionMenu(event, previewAsset);
         }}
         onCopy={() => {
-          if (!previewAsset || displayMode === "clip") return;
+          if (!previewAsset || displayMode === "clip" || displayMode === "performance") return;
           onCopyImageToClipboard(previewAsset.path);
         }}
         onReveal={() => {

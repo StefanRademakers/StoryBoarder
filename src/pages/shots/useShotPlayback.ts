@@ -97,7 +97,8 @@ export function useShotPlayback<TShot extends PlaybackShot>({
     if (!currentShot) return;
 
     onActivateShotRef.current(currentShot.id);
-    const useVideoEnded = displayMode === "clip" && Boolean(resolvePathRef.current(currentShot, "clip"));
+    const useVideoEnded = (displayMode === "clip" || displayMode === "performance")
+      && Boolean(resolvePathRef.current(currentShot, displayMode));
     if (!useVideoEnded) {
       const durationMs = resolveShotDurationMs(currentShot.durationSeconds);
       playbackTimerRef.current = setTimeout(() => {
@@ -144,8 +145,10 @@ export function useShotPlayback<TShot extends PlaybackShot>({
       return { kind: "placeholder", path: "", sourceMode: null };
     }
 
-    const modeOrder = displayMode === "clip"
-      ? (["clip", "still", "reference", "concept"] as ShotDisplayMode[])
+    const modeOrder = displayMode === "performance"
+      ? (["performance", "clip", "still", "reference", "concept"] as ShotDisplayMode[])
+      : displayMode === "clip"
+        ? (["clip", "performance", "still", "reference", "concept"] as ShotDisplayMode[])
       : displayMode === "still"
         ? (["still", "reference", "concept"] as ShotDisplayMode[])
         : displayMode === "reference"
@@ -156,7 +159,7 @@ export function useShotPlayback<TShot extends PlaybackShot>({
       const path = resolvePathRef.current(playbackShot, mode);
       if (!path) continue;
       return {
-        kind: mode === "clip" ? "video" : "image",
+        kind: mode === "clip" || mode === "performance" ? "video" : "image",
         path,
         sourceMode: mode,
       };

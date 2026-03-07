@@ -231,6 +231,7 @@ export function ShotsList({
           const assetSrc = assetAbsolute
             ? `${toFileUrl(assetAbsolute)}${cacheToken ? `?v=${cacheToken}` : ""}`
             : "";
+          const isVideoMode = displayMode === "clip" || displayMode === "performance";
           const isActive = shot.id === activeShotId;
           const shotNumber = String(idx + 1).padStart(2, "0");
           const descriptionActionValue = shot.description.trim()
@@ -280,13 +281,13 @@ export function ShotsList({
                 </div>
                 <div className="shots-row__image">
                   {assetAbsolute ? (
-                    displayMode === "clip" ? (
+                    isVideoMode ? (
                       <video src={assetSrc} muted playsInline preload="metadata" />
                     ) : (
                       <img src={assetSrc} alt="" />
                     )
                   ) : (
-                    <span className="muted">{displayMode === "clip" ? "Clip" : "Image"}</span>
+                    <span className="muted">{displayMode === "performance" ? "Performance clip" : (displayMode === "clip" ? "Clip" : "Image")}</span>
                   )}
                 </div>
                 <div className="shots-row__text">
@@ -326,7 +327,7 @@ export function ShotsList({
                               await onUpdateShotMedia(paths, { shotId: shot.id });
                             }}
                           >
-                            {displayMode === "clip" ? (
+                            {isVideoMode ? (
                               <video src={assetSrc} controls preload="metadata" />
                             ) : (
                               <img src={assetSrc} alt="Shot" />
@@ -334,7 +335,7 @@ export function ShotsList({
                           </div>
                         ) : (
                           <DropOrBrowse
-                            label={displayMode === "clip" ? "Drop clip here or click to browse" : "Drop image here or click to browse"}
+                            label={displayMode === "performance" ? "Drop performance clip here or click to browse" : (displayMode === "clip" ? "Drop clip here or click to browse" : "Drop image here or click to browse")}
                             className="moodboard-dropzone"
                             onContextMenu={(event) => onOpenImageMenu(event, shot.id)}
                             enablePasteContextMenu={false}
