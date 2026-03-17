@@ -1182,6 +1182,57 @@ button {
   align-items: center;
 }
 
+.shots-toolbar__export-menu {
+  position: relative;
+}
+
+.shots-toolbar__export-button {
+  min-width: 120px;
+  justify-content: space-between;
+}
+
+.shots-toolbar__export-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.shots-toolbar__export-caret img {
+  width: 10px;
+  height: 10px;
+  display: block;
+  opacity: 0.9;
+}
+
+.shots-toolbar__export-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 170px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #171a1f;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
+  padding: 6px;
+  z-index: 40;
+}
+
+.shots-toolbar__export-dropdown-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  padding: 9px 10px;
+  text-align: left;
+  border-radius: 8px;
+}
+
+.shots-toolbar__export-dropdown-item:hover,
+.shots-toolbar__export-dropdown-item:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .shots-toolbar__row {
   display: flex;
   justify-content: space-between;
@@ -1444,6 +1495,20 @@ button {
 
 .export-grid-resize-input {
   width: 96px;
+}
+
+.html-export-dialog {
+  width: min(920px, 95vw);
+}
+
+.html-export-dialog__modes {
+  flex-wrap: wrap;
+}
+
+.html-export-dialog__scope {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .shot-versions-grid__actions {

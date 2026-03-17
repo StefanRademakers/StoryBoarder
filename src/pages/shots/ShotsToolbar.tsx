@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { SegmentedControl, type SegmentedControlOption } from "../../components/common/SegmentedControl";
 import type { ShotDisplayMode } from "./types";
 
@@ -15,6 +16,7 @@ interface ShotsToolbarProps {
   onOpenExport: () => void;
   onExportFcp7: () => void;
   onExportClips: () => void;
+  onExportHtml: () => void;
   onDisplayModeChange: (mode: ShotDisplayMode) => void;
 }
 
@@ -32,8 +34,41 @@ export function ShotsToolbar({
   onOpenExport,
   onExportFcp7,
   onExportClips,
+  onExportHtml,
   onDisplayModeChange,
 }: ShotsToolbarProps) {
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  const exportDisabled = !hasShots || gridExportBusy;
+
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      const root = exportMenuRef.current;
+      if (!root) return;
+      if (event.target instanceof Node && root.contains(event.target)) return;
+      setExportMenuOpen(false);
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setExportMenuOpen(false);
+    };
+
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [exportMenuOpen]);
+
+  const runExportAction = (action: () => void) => {
+    setExportMenuOpen(false);
+    action();
+  };
+
   return (
     <section className="panel shots-toolbar">
       <div className="shots-toolbar__row">
@@ -56,30 +91,62 @@ export function ShotsToolbar({
           >
             Candidates
           </button>
-          <button
-            type="button"
-            className="pill-button"
-            disabled={!hasShots || gridExportBusy}
-            onClick={onOpenExport}
-          >
-            Export
-          </button>
-          <button
-            type="button"
-            className="pill-button"
-            disabled={!hasShots || gridExportBusy}
-            onClick={onExportFcp7}
-          >
-            Export FCP7
-          </button>
-          <button
-            type="button"
-            className="pill-button"
-            disabled={!hasShots || gridExportBusy}
-            onClick={onExportClips}
-          >
-            Export Clips
-          </button>
+          <div className="shots-toolbar__export-menu" ref={exportMenuRef}>
+            <button
+              type="button"
+              className="pill-button shots-toolbar__export-button"
+              disabled={exportDisabled}
+              aria-expanded={exportMenuOpen}
+              aria-haspopup="menu"
+              onClick={() => setExportMenuOpen((current) => !current)}
+            >
+              Export
+              <span className="shots-toolbar__export-caret" aria-hidden>
+                <img
+                  src={exportMenuOpen ? "icons/up.png" : "icons/down.png"}
+                  width={10}
+                  height={10}
+                  alt=""
+                />
+              </span>
+            </button>
+            {exportMenuOpen ? (
+              <div className="shots-toolbar__export-dropdown" role="menu" aria-label="Export options">
+                <button
+                  type="button"
+                  className="shots-toolbar__export-dropdown-item"
+                  role="menuitem"
+                  onClick={() => runExportAction(onOpenExport)}
+                >
+                  Export Grid
+                </button>
+                <button
+                  type="button"
+                  className="shots-toolbar__export-dropdown-item"
+                  role="menuitem"
+                  onClick={() => runExportAction(onExportFcp7)}
+                >
+                  Export FCP7
+                </button>
+                <button
+                  type="button"
+                  className="shots-toolbar__export-dropdown-item"
+                  role="menuitem"
+                  onClick={() => runExportAction(onExportClips)}
+                >
+                  Export Clips
+                </button>
+                <button
+                  type="button"
+                  className="shots-toolbar__export-dropdown-item"
+                  role="menuitem"
+                  onClick={() => runExportAction(onExportHtml)}
+                >
+                  Html Export
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
         <SegmentedControl
           className="shots-toolbar__modes"

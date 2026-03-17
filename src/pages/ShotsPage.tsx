@@ -9,6 +9,7 @@ import type { SegmentedControlOption } from "../components/common/SegmentedContr
 import { useEscapeKey } from "../hooks/useEscapeKey";
 import { CandidatesModal } from "./shots/CandidatesModal";
 import { ExportGridDialog } from "./shots/ExportGridDialog";
+import { HtmlExportDialog } from "./shots/HtmlExportDialog";
 import { ScenePoolModal } from "./shots/ScenePoolModal";
 import { ShotsContextMenus } from "./shots/ShotsContextMenus";
 import { ShotsLightboxes } from "./shots/ShotsLightboxes";
@@ -976,11 +977,19 @@ export function ShotsPage({ project }: ShotsPageProps) {
     setVersionMenuPos({ x: event.clientX, y: event.clientY });
   };
 
-  const shotAssetPath = (shot: ShotItem, mode: ShotDisplayMode = displayMode): string => {
-    if (!sceneDir) return "";
+  const shotAssetPathForScene = (
+    sceneId: string,
+    shot: ShotItem,
+    mode: ShotDisplayMode = displayMode,
+  ): string => {
     const relative = getPlayableRelative(shot, mode);
     if (!relative) return "";
-    return joinPath(sceneDir, relative);
+    return joinPath(joinPath(scenesRoot, sceneId), relative);
+  };
+
+  const shotAssetPath = (shot: ShotItem, mode: ShotDisplayMode = displayMode): string => {
+    if (!activeSceneId) return "";
+    return shotAssetPathForScene(activeSceneId, shot, mode);
   };
 
   const resolveShotAssetPathForFcp7 = (shot: ShotItem): { path: string; mediaType: "video" | "image"; durationSeconds?: number | null } | null => {
@@ -1037,6 +1046,12 @@ export function ShotsPage({ project }: ShotsPageProps) {
     exportEndIndexText,
     exportResizeEnabled,
     exportMaxLongestEdgeText,
+    htmlExportDialogOpen,
+    htmlExportStartIndexText,
+    htmlExportEndIndexText,
+    htmlExportModes,
+    htmlExportImageFormat,
+    htmlExportSceneScope,
     gridExportBusy,
     gridExportMessage,
     setExportColumnsText,
@@ -1044,22 +1059,48 @@ export function ShotsPage({ project }: ShotsPageProps) {
     setExportEndIndexText,
     setExportResizeEnabled,
     setExportMaxLongestEdgeText,
+    setHtmlExportStartIndexText,
+    setHtmlExportEndIndexText,
+    setHtmlExportModes,
+    setHtmlExportImageFormat,
+    setHtmlExportSceneScope,
     openExportDialog,
     closeExportDialog,
+    openHtmlExportDialog,
+    closeHtmlExportDialog,
     exportSceneGrid,
     exportSceneFcp7,
     exportSceneClips,
+    exportSceneHtml,
   } = useShotsExport({
     activeScene: activeScene ? { id: activeScene.id, name: activeScene.name } : null,
+    exportScenes: scenes.map((scene) => ({ id: scene.id, name: scene.name })),
+    loadShotsForScene: async (sceneId) => {
+      const loaded = await readShotsForScene(scenesRoot, sceneId, normalizeUnknownShots);
+      const repaired = await cleanMediaStateForScene(sceneId, loaded);
+      return repaired.shots;
+    },
     shots,
     displayMode,
+    projectRoot: project.paths.root,
     scenesRoot,
     projectFrameRate: resolveProjectDimension(project.settings?.framerate, 24),
     projectWidth,
     projectHeight,
     resolveShotAssetPath: (shot, mode) => shotAssetPath(shot, mode),
+    resolveShotAssetPathForScene: (sceneId, shot, mode) => shotAssetPathForScene(sceneId, shot, mode),
     resolveFcp7Media: resolveShotAssetPathForFcp7,
     resolveFavoriteClipPath: resolveFavoriteClipPathForExport,
+    resolveShotDescription: (shot) => shot.description,
+    resolveShotDetails: (shot) => ({
+      durationSeconds: shot.durationSeconds ?? null,
+      angle: shot.angle ?? "",
+      shotSize: shot.shotSize ?? "",
+      characterFraming: shot.characterFraming ?? "",
+      movement: shot.movement ?? "",
+      action: shot.action ?? "",
+      notes: shot.notes ?? "",
+    }),
   });
   const {
     createShot: createShotCrud,
@@ -1163,6 +1204,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
   useEscapeKey(poolOpen, () => setPoolOpen(false));
   useEscapeKey(candidatesOpen, () => setCandidatesOpen(false));
   useEscapeKey(exportDialogOpen, closeExportDialog);
+  useEscapeKey(htmlExportDialogOpen, closeHtmlExportDialog);
 
   const setFavoriteForAsset = async (asset: ShotModeAsset) => {
     if (!activeShotId || !activeSceneId) return;
@@ -1335,6 +1377,9 @@ export function ShotsPage({ project }: ShotsPageProps) {
               onExportClips={() => {
                 void exportSceneClips();
               }}
+              onExportHtml={() => {
+                openHtmlExportDialog();
+              }}
               onDisplayModeChange={setDisplayMode}
             />
 
@@ -1451,6 +1496,25 @@ export function ShotsPage({ project }: ShotsPageProps) {
         onCancel={closeExportDialog}
         onExport={() => {
           void exportSceneGrid();
+        }}
+      />
+
+      <HtmlExportDialog
+        open={htmlExportDialogOpen}
+        startIndexText={htmlExportStartIndexText}
+        endIndexText={htmlExportEndIndexText}
+        selectedModes={htmlExportModes}
+        imageFormat={htmlExportImageFormat}
+        sceneScope={htmlExportSceneScope}
+        exportBusy={gridExportBusy}
+        onChangeStartIndex={setHtmlExportStartIndexText}
+        onChangeEndIndex={setHtmlExportEndIndexText}
+        onChangeSelectedModes={setHtmlExportModes}
+        onChangeImageFormat={setHtmlExportImageFormat}
+        onChangeSceneScope={setHtmlExportSceneScope}
+        onCancel={closeHtmlExportDialog}
+        onExport={() => {
+          void exportSceneHtml();
         }}
       />
 

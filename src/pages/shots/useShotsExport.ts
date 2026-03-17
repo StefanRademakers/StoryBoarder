@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { electron } from "../../services/electron";
 import { joinPath } from "../../utils/path";
+import type { HtmlExportImageFormat, HtmlExportSceneScope } from "./HtmlExportDialog";
 import type { ShotDisplayMode } from "./types";
 import { parsePositiveInteger, sanitizeFileName, toErrorMessage } from "./utils";
 
@@ -11,15 +12,21 @@ interface ActiveSceneLike {
 
 interface UseShotsExportParams<TShot> {
   activeScene: ActiveSceneLike | null;
+  exportScenes: ActiveSceneLike[];
+  loadShotsForScene: (sceneId: string) => Promise<TShot[]>;
   shots: TShot[];
   displayMode: ShotDisplayMode;
+  projectRoot: string;
   scenesRoot: string;
   projectFrameRate: number;
   projectWidth: number;
   projectHeight: number;
-  resolveShotAssetPath: (shot: TShot, mode: "concept" | "reference" | "still") => string;
+  resolveShotAssetPath: (shot: TShot, mode: ShotDisplayMode) => string;
+  resolveShotAssetPathForScene: (sceneId: string, shot: TShot, mode: ShotDisplayMode) => string;
   resolveFcp7Media: (shot: TShot) => { path: string; mediaType: "video" | "image"; durationSeconds?: number | null } | null;
   resolveFavoriteClipPath: (shot: TShot) => string;
+  resolveShotDescription?: (shot: TShot) => string | null | undefined;
+  resolveShotDetails?: (shot: TShot) => Record<string, string | number | null | undefined>;
 }
 
 interface UseShotsExportResult {
@@ -29,6 +36,12 @@ interface UseShotsExportResult {
   exportEndIndexText: string;
   exportResizeEnabled: boolean;
   exportMaxLongestEdgeText: string;
+  htmlExportDialogOpen: boolean;
+  htmlExportStartIndexText: string;
+  htmlExportEndIndexText: string;
+  htmlExportModes: ShotDisplayMode[];
+  htmlExportImageFormat: HtmlExportImageFormat;
+  htmlExportSceneScope: HtmlExportSceneScope;
   gridExportBusy: boolean;
   gridExportMessage: string | null;
   setExportColumnsText: (value: string) => void;
@@ -36,12 +49,22 @@ interface UseShotsExportResult {
   setExportEndIndexText: (value: string) => void;
   setExportResizeEnabled: (value: boolean) => void;
   setExportMaxLongestEdgeText: (value: string) => void;
+  setHtmlExportStartIndexText: (value: string) => void;
+  setHtmlExportEndIndexText: (value: string) => void;
+  setHtmlExportModes: (value: ShotDisplayMode[]) => void;
+  setHtmlExportImageFormat: (value: HtmlExportImageFormat) => void;
+  setHtmlExportSceneScope: (value: HtmlExportSceneScope) => void;
   openExportDialog: () => void;
   closeExportDialog: () => void;
+  openHtmlExportDialog: () => void;
+  closeHtmlExportDialog: () => void;
   exportSceneGrid: () => Promise<void>;
   exportSceneFcp7: () => Promise<void>;
   exportSceneClips: () => Promise<void>;
+  exportSceneHtml: () => Promise<void>;
 }
+
+const HTML_EXPORT_DEFAULT_MODES: ShotDisplayMode[] = ["concept", "still", "clip", "performance", "reference"];
 
 function fileExtension(value: string): string {
   const normalized = value.replace(/\\/g, "/");
@@ -56,15 +79,21 @@ function fileExtension(value: string): string {
 
 export function useShotsExport<TShot>({
   activeScene,
+  exportScenes,
+  loadShotsForScene,
   shots,
   displayMode,
+  projectRoot,
   scenesRoot,
   projectFrameRate,
   projectWidth,
   projectHeight,
   resolveShotAssetPath,
+  resolveShotAssetPathForScene,
   resolveFcp7Media,
   resolveFavoriteClipPath,
+  resolveShotDescription,
+  resolveShotDetails,
 }: UseShotsExportParams<TShot>): UseShotsExportResult {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportColumnsText, setExportColumnsText] = useState("2");
@@ -72,6 +101,12 @@ export function useShotsExport<TShot>({
   const [exportEndIndexText, setExportEndIndexText] = useState("1");
   const [exportResizeEnabled, setExportResizeEnabled] = useState(false);
   const [exportMaxLongestEdgeText, setExportMaxLongestEdgeText] = useState("2024");
+  const [htmlExportDialogOpen, setHtmlExportDialogOpen] = useState(false);
+  const [htmlExportStartIndexText, setHtmlExportStartIndexText] = useState("1");
+  const [htmlExportEndIndexText, setHtmlExportEndIndexText] = useState("1");
+  const [htmlExportModes, setHtmlExportModes] = useState<ShotDisplayMode[]>([...HTML_EXPORT_DEFAULT_MODES]);
+  const [htmlExportImageFormat, setHtmlExportImageFormat] = useState<HtmlExportImageFormat>("jpg80");
+  const [htmlExportSceneScope, setHtmlExportSceneScope] = useState<HtmlExportSceneScope>("current");
   const [gridExportBusy, setGridExportBusy] = useState(false);
   const [gridExportMessage, setGridExportMessage] = useState<string | null>(null);
 
@@ -87,6 +122,20 @@ export function useShotsExport<TShot>({
     setExportResizeEnabled(false);
     setExportMaxLongestEdgeText("2024");
     setExportDialogOpen(true);
+  }, [shots.length]);
+
+  const closeHtmlExportDialog = useCallback(() => {
+    setHtmlExportDialogOpen(false);
+  }, []);
+
+  const openHtmlExportDialog = useCallback(() => {
+    const totalShots = shots.length || 1;
+    setHtmlExportStartIndexText("1");
+    setHtmlExportEndIndexText(String(totalShots));
+    setHtmlExportModes([...HTML_EXPORT_DEFAULT_MODES]);
+    setHtmlExportImageFormat("jpg80");
+    setHtmlExportSceneScope("current");
+    setHtmlExportDialogOpen(true);
   }, [shots.length]);
 
   const exportSceneGrid = useCallback(async () => {
@@ -287,6 +336,112 @@ export function useShotsExport<TShot>({
     }
   }, [activeScene, gridExportBusy, resolveFavoriteClipPath, scenesRoot, shots]);
 
+  const exportSceneHtml = useCallback(async () => {
+    if (gridExportBusy) return;
+    const selectedModes = htmlExportModes.filter((mode) => HTML_EXPORT_DEFAULT_MODES.includes(mode));
+    if (!selectedModes.length) {
+      setGridExportMessage("Html Export failed: select at least one mode.");
+      return;
+    }
+
+    const startRaw = parsePositiveInteger(htmlExportStartIndexText);
+    const endRaw = parsePositiveInteger(htmlExportEndIndexText);
+    const buildScenePayload = (sceneId: string, sceneName: string, sceneShots: TShot[]) => {
+      const totalShots = sceneShots.length;
+      if (!totalShots) return null;
+      const startIndex = Math.max(1, Math.min(totalShots, startRaw ?? 1));
+      const endIndex = Math.max(startIndex, Math.min(totalShots, endRaw ?? totalShots));
+      const exportShots = sceneShots.slice(startIndex - 1, endIndex);
+      if (!exportShots.length) return null;
+      return {
+        sceneId,
+        sceneName,
+        shots: exportShots.map((shot, idx) => ({
+          shotNumber: startIndex + idx,
+          description: resolveShotDescription?.(shot)?.trim() ?? "",
+          details: resolveShotDetails?.(shot) ?? {},
+          mediaByMode: selectedModes.reduce<Record<string, string>>((acc, mode) => {
+            acc[mode] = resolveShotAssetPathForScene(sceneId, shot, mode);
+            return acc;
+          }, {}),
+        })),
+      };
+    };
+
+    const payloadScenes: Array<{ sceneId: string; sceneName: string; shots: Array<Record<string, unknown>> }> = [];
+    if (htmlExportSceneScope === "all") {
+      for (const scene of exportScenes) {
+        const sceneShots = scene.id === activeScene?.id ? shots : await loadShotsForScene(scene.id);
+        const payload = buildScenePayload(scene.id, scene.name, sceneShots);
+        if (payload) {
+          payloadScenes.push(payload);
+        }
+      }
+    } else {
+      if (!activeScene) {
+        setGridExportMessage("Html Export failed: no active scene.");
+        return;
+      }
+      const payload = buildScenePayload(activeScene.id, activeScene.name, shots);
+      if (payload) {
+        payloadScenes.push(payload);
+      }
+    }
+
+    if (!payloadScenes.length) {
+      setGridExportMessage("Html Export failed: no shots in selected range.");
+      return;
+    }
+
+    setGridExportBusy(true);
+    setGridExportMessage(null);
+    try {
+      const response = await electron.runPythonCommand(
+        "export_html_shots",
+        {
+          projectRoot,
+          imageFormat: htmlExportImageFormat,
+          selectedModes,
+          scenes: payloadScenes,
+        },
+        { timeoutMs: 180000 },
+      );
+      if (!response.ok) {
+        setGridExportMessage(`Html Export failed: ${response.error.message}`);
+        return;
+      }
+      const outputDir = typeof response.data?.outputDir === "string"
+        ? response.data.outputDir
+        : joinPath(projectRoot, "exports");
+      const exportedCount = typeof response.data?.count === "number"
+        ? response.data.count
+        : payloadScenes.reduce((sum, scene) => sum + scene.shots.length, 0);
+      setGridExportMessage(`Html Export completed (${exportedCount} shots).`);
+      await electron.revealInFileManager(outputDir);
+      setHtmlExportDialogOpen(false);
+    } catch (error) {
+      setGridExportMessage(`Html Export failed: ${toErrorMessage(error)}`);
+    } finally {
+      setGridExportBusy(false);
+    }
+  }, [
+    activeScene,
+    gridExportBusy,
+    htmlExportEndIndexText,
+    htmlExportImageFormat,
+    htmlExportModes,
+    htmlExportSceneScope,
+    htmlExportStartIndexText,
+    exportScenes,
+    loadShotsForScene,
+    projectRoot,
+    resolveShotAssetPathForScene,
+    resolveShotDescription,
+    resolveShotDetails,
+    activeScene,
+    shots,
+  ]);
+
   return {
     exportDialogOpen,
     exportColumnsText,
@@ -294,6 +449,12 @@ export function useShotsExport<TShot>({
     exportEndIndexText,
     exportResizeEnabled,
     exportMaxLongestEdgeText,
+    htmlExportDialogOpen,
+    htmlExportStartIndexText,
+    htmlExportEndIndexText,
+    htmlExportModes,
+    htmlExportImageFormat,
+    htmlExportSceneScope,
     gridExportBusy,
     gridExportMessage,
     setExportColumnsText,
@@ -301,10 +462,18 @@ export function useShotsExport<TShot>({
     setExportEndIndexText,
     setExportResizeEnabled,
     setExportMaxLongestEdgeText,
+    setHtmlExportStartIndexText,
+    setHtmlExportEndIndexText,
+    setHtmlExportModes,
+    setHtmlExportImageFormat,
+    setHtmlExportSceneScope,
     openExportDialog,
     closeExportDialog,
+    openHtmlExportDialog,
+    closeHtmlExportDialog,
     exportSceneGrid,
     exportSceneFcp7,
     exportSceneClips,
+    exportSceneHtml,
   };
 }
