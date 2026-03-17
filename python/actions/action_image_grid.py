@@ -49,6 +49,8 @@ def _parse_settings(data):
     tile_outline_color = "#5079a5"
     tile_outline_width = 2
     resize_to_max_longest_edge = False
+    save_jpeg_copy = False
+    jpeg_quality = 80
 
     if isinstance(data, dict):
         if "xTiles" in data:
@@ -107,6 +109,12 @@ def _parse_settings(data):
             except Exception:
                 pass
         resize_to_max_longest_edge = bool(data.get("resizeToMaxLongestEdge", resize_to_max_longest_edge))
+        save_jpeg_copy = bool(data.get("saveJpegCopy", save_jpeg_copy))
+        if "jpegQuality" in data:
+            try:
+                jpeg_quality = int(data.get("jpegQuality", jpeg_quality))
+            except Exception:
+                pass
 
     if columns < 1:
         columns = 1
@@ -126,6 +134,10 @@ def _parse_settings(data):
     output_path = output_path.strip()
     if tile_outline_width < 0:
         tile_outline_width = 0
+    if jpeg_quality < 1:
+        jpeg_quality = 1
+    if jpeg_quality > 100:
+        jpeg_quality = 100
 
     return (
         columns,
@@ -144,6 +156,8 @@ def _parse_settings(data):
         tile_outline_color,
         tile_outline_width,
         resize_to_max_longest_edge,
+        save_jpeg_copy,
+        jpeg_quality,
     )
 
 
@@ -199,7 +213,7 @@ def create_image_grid(paths, report_progress=None, data=None):
     - The height of the output image is dynamic based on the number of rows.
     - The output PNG is saved in the same folder as the input images.
     """
-    columns, max_longest_edge, background_color, padding, add_labels, text_color, tile_prefix, tile_width, tile_height, fit_mode, output_dir, output_name_prefix, output_path, tile_outline_color, tile_outline_width, resize_to_max_longest_edge = _parse_settings(data)
+    columns, max_longest_edge, background_color, padding, add_labels, text_color, tile_prefix, tile_width, tile_height, fit_mode, output_dir, output_name_prefix, output_path, tile_outline_color, tile_outline_width, resize_to_max_longest_edge, save_jpeg_copy, jpeg_quality = _parse_settings(data)
     items = _normalize_items(paths, data)
     if not items:
         return "No images provided."
@@ -337,4 +351,22 @@ def create_image_grid(paths, report_progress=None, data=None):
 
     grid_img.save(final_output_path)
 
-    return f"Grid image saved to: {final_output_path}"
+    jpeg_output_path = ""
+    if save_jpeg_copy:
+        jpeg_output_path = f"{os.path.splitext(final_output_path)[0]}.jpg"
+        rgb_background = Image.new("RGB", grid_img.size, bg_rgba[:3])
+        if grid_img.mode == "RGBA":
+            rgb_background.paste(grid_img, mask=grid_img.getchannel("A"))
+        else:
+            rgb_background.paste(grid_img)
+        rgb_background.save(jpeg_output_path, format="JPEG", quality=jpeg_quality, optimize=True)
+
+    message = f"Grid image saved to: {final_output_path}"
+    if jpeg_output_path:
+        message += f" (JPEG copy: {jpeg_output_path}, quality={jpeg_quality})"
+
+    return {
+        "message": message,
+        "outputPath": final_output_path,
+        "jpegOutputPath": jpeg_output_path or None,
+    }

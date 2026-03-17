@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { FocusEvent, KeyboardEvent, ReactNode } from "react";
 import { DropOrBrowse } from "../../components/common/DropOrBrowse";
+import { MediaSurface } from "../../components/common/MediaSurface";
 import { extractPathsFromDrop, handleDragOver } from "../../utils/dnd";
 import { toFileUrl } from "../../utils/path";
 import type { ShotDisplayMode } from "./types";
@@ -281,11 +282,14 @@ export function ShotsList({
                 </div>
                 <div className="shots-row__image">
                   {assetAbsolute ? (
-                    isVideoMode ? (
-                      <video src={assetSrc} muted playsInline preload="metadata" />
-                    ) : (
-                      <img src={assetSrc} alt="" />
-                    )
+                    <MediaSurface
+                      path={assetAbsolute}
+                      src={assetSrc}
+                      kind={isVideoMode ? "video" : "image"}
+                      variant="row"
+                      muted={isVideoMode}
+                      preload="metadata"
+                    />
                   ) : (
                     <span className="muted">{displayMode === "performance" ? "Performance clip" : (displayMode === "clip" ? "Clip" : "Image")}</span>
                   )}
@@ -327,11 +331,15 @@ export function ShotsList({
                               await onUpdateShotMedia(paths, { shotId: shot.id });
                             }}
                           >
-                            {isVideoMode ? (
-                              <video src={assetSrc} controls preload="metadata" />
-                            ) : (
-                              <img src={assetSrc} alt="Shot" />
-                            )}
+                            <MediaSurface
+                              path={assetAbsolute}
+                              src={assetSrc}
+                              kind={isVideoMode ? "video" : "image"}
+                              variant="inline"
+                              controls={isVideoMode}
+                              preload="metadata"
+                              alt="Shot"
+                            />
                           </div>
                         ) : (
                           <DropOrBrowse

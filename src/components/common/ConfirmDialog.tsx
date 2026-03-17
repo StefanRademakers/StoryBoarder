@@ -24,7 +24,7 @@ export function ConfirmDialog({
   if (!open) return null;
 
   return (
-    <div className="modal-backdrop">
+    <div className="modal-backdrop modal-backdrop--confirm">
       <div className="modal">
         <div className="modal__header">
           <h3 className="modal__title">{title}</h3>

@@ -45,6 +45,9 @@ export const electron = {
   copyImageToClipboard(path: string): Promise<boolean> {
     return getElectron().copyImageToClipboard(path);
   },
+  copyPathToClipboard(path: string): Promise<boolean> {
+    return getElectron().copyPathToClipboard(path);
+  },
   copyFile(from: string, to: string): Promise<void> {
     return getElectron().copyFile(from, to);
   },

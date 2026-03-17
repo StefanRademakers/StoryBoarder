@@ -3,6 +3,8 @@ import type { ProjectsIndex, ProjectsIndexEntry } from "../state/types";
 import { NewProjectModal } from "../components/layout/NewProjectModal";
 import { toFileUrl } from "../utils/path";
 import { useEscapeKey } from "../hooks/useEscapeKey";
+import { electron } from "../services/electron";
+import { resolveProjectsIndexLocation } from "../utils/projectsIndexPaths";
 
 const PlusIcon = (
   <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
@@ -116,6 +118,12 @@ export function ProjectsOverview({
     setRenameValue(entry.name);
     setRenameError(null);
     setRenameOpen(true);
+    closeMenu();
+  };
+
+  const copyProjectPathToClipboard = async (entry: ProjectsIndexEntry) => {
+    const absolutePath = resolveProjectsIndexLocation(entry.location);
+    await electron.copyPathToClipboard(absolutePath);
     closeMenu();
   };
 
@@ -241,6 +249,15 @@ export function ProjectsOverview({
               }}
             >
               Duplicate
+            </button>
+            <button
+              type="button"
+              className="context-menu__item"
+              onClick={() => {
+                void copyProjectPathToClipboard(menuItem);
+              }}
+            >
+              Copy as Path
             </button>
             <button type="button" className="context-menu__item" disabled title="Coming soon">
               Archive

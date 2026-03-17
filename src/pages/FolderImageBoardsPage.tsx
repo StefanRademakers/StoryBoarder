@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import type { ProjectState } from "../state/types";
-import { joinPath, toFileUrl } from "../utils/path";
+import { getDirectoryName, joinPath } from "../utils/path";
 import { electron } from "../services/electron";
 import { DropOrBrowse } from "../components/common/DropOrBrowse";
 import { ConfirmDialog } from "../components/common/ConfirmDialog";
@@ -10,6 +10,8 @@ import { MediaLightbox } from "../components/common/MediaLightbox";
 import { MediaTileGrid } from "../components/common/MediaTileGrid";
 import { inferMediaKind, type MediaItem } from "../components/common/mediaTypes";
 import { useEscapeKey } from "../hooks/useEscapeKey";
+import { getImageThumbnailPath } from "../components/common/mediaThumbnails";
+import { loadBoardFavorites, saveBoardFavorites } from "../services/boardMetaService";
 
 interface FolderImageBoardsPageProps {
   project: ProjectState;
@@ -28,6 +30,7 @@ interface BoardMedia {
   name: string;
   path: string;
   mtimeMs: number;
+  isFavorite: boolean;
 }
 
 export function FolderImageBoardsPage({
@@ -46,8 +49,8 @@ export function FolderImageBoardsPage({
   const [newName, setNewName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [images, setImages] = useState<BoardMedia[]>([]);
+  const [favoriteNames, setFavoriteNames] = useState<string[]>([]);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
-  const [previewSize, setPreviewSize] = useState<{ width: number; height: number } | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<BoardMedia | null>(null);
   const [menuItem, setMenuItem] = useState<BoardItem | null>(null);
@@ -59,6 +62,10 @@ export function FolderImageBoardsPage({
   const [actionError, setActionError] = useState<string | null>(null);
   const [imageMenuItem, setImageMenuItem] = useState<BoardMedia | null>(null);
   const [imageMenuPos, setImageMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [mediaRenameOpen, setMediaRenameOpen] = useState(false);
+  const [mediaRenameTarget, setMediaRenameTarget] = useState<BoardMedia | null>(null);
+  const [mediaRenameValue, setMediaRenameValue] = useState("");
+  const [mediaRenameError, setMediaRenameError] = useState<string | null>(null);
 
   useEscapeKey(dialogOpen, () => setDialogOpen(false));
   useEscapeKey(renameOpen, () => {
@@ -66,6 +73,12 @@ export function FolderImageBoardsPage({
     setRenameTarget(null);
     setRenameValue("");
     setRenameError(null);
+  });
+  useEscapeKey(mediaRenameOpen, () => {
+    setMediaRenameOpen(false);
+    setMediaRenameTarget(null);
+    setMediaRenameValue("");
+    setMediaRenameError(null);
   });
 
   const loadItems = async () => {
@@ -92,25 +105,38 @@ export function FolderImageBoardsPage({
     [images],
   );
 
-  const loadImages = async (dir: string) => {
+  const loadBoardMedia = async (dir: string) => {
     const entries = await electron.listDir(dir);
     const files = entries.filter((e) => e.isFile && isSupportedMediaFile(e.name));
     const list: BoardMedia[] = [];
     for (const f of files) {
       const path = joinPath(dir, f.name);
       const stat = await electron.stat(path);
-      list.push({ name: f.name, path, mtimeMs: stat?.mtimeMs ?? 0 });
+      list.push({ name: f.name, path, mtimeMs: stat?.mtimeMs ?? 0, isFavorite: false });
     }
     list.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    setImages(list);
+
+    const loadedFavorites = await loadBoardFavorites(dir);
+    const resolvedFavorites = resolveFavoritesAgainstFiles(list.map((item) => item.name), loadedFavorites);
+    if (!areStringArraysEqual(loadedFavorites, resolvedFavorites)) {
+      await saveBoardFavorites(dir, resolvedFavorites);
+    }
+
+    const favoriteLookup = new Set(resolvedFavorites.map((name) => name.toLowerCase()));
+    setFavoriteNames(resolvedFavorites);
+    setImages(list.map((item) => ({
+      ...item,
+      isFavorite: favoriteLookup.has(item.name.toLowerCase()),
+    })));
   };
 
   useEffect(() => {
     if (!activeItem) {
       setImages([]);
+      setFavoriteNames([]);
       return;
     }
-    void loadImages(activeItem.path);
+    void loadBoardMedia(activeItem.path);
   }, [activeItem?.path]);
 
   const createItem = async () => {
@@ -147,6 +173,16 @@ export function FolderImageBoardsPage({
     closeMenu();
   };
 
+  const copyBoardPathToClipboard = async (item: BoardItem) => {
+    const ok = await electron.copyPathToClipboard(item.path);
+    if (!ok) {
+      setActionError("Failed to copy path.");
+    } else {
+      setActionError(null);
+    }
+    closeMenu();
+  };
+
   const closeImageMenu = () => {
     setImageMenuItem(null);
     setImageMenuPos(null);
@@ -160,6 +196,16 @@ export function FolderImageBoardsPage({
 
   const revealImageInExplorer = async (image: BoardMedia) => {
     await electron.revealInFileManager(image.path);
+    closeImageMenu();
+  };
+
+  const copyMediaPathToClipboard = async (image: BoardMedia) => {
+    const ok = await electron.copyPathToClipboard(image.path);
+    if (!ok) {
+      setActionError("Failed to copy path.");
+    } else {
+      setActionError(null);
+    }
     closeImageMenu();
   };
 
@@ -196,6 +242,34 @@ export function FolderImageBoardsPage({
     } else {
       setActionError(null);
     }
+    closeImageMenu();
+  };
+
+  const toggleFavorite = async (image: BoardMedia) => {
+    if (!activeItem) return;
+    const key = image.name.toLowerCase();
+    const current = favoriteNames.slice();
+    const next = image.isFavorite
+      ? current.filter((name) => name.toLowerCase() !== key)
+      : [...current, image.name];
+
+    const resolved = resolveFavoritesAgainstFiles(images.map((item) => item.name), next);
+    await saveBoardFavorites(activeItem.path, resolved);
+
+    const favoriteLookup = new Set(resolved.map((name) => name.toLowerCase()));
+    setFavoriteNames(resolved);
+    setImages((itemsCurrent) => itemsCurrent.map((entry) => ({
+      ...entry,
+      isFavorite: favoriteLookup.has(entry.name.toLowerCase()),
+    })));
+    closeImageMenu();
+  };
+
+  const startMediaRename = (image: BoardMedia) => {
+    setMediaRenameTarget(image);
+    setMediaRenameValue(image.name);
+    setMediaRenameError(null);
+    setMediaRenameOpen(true);
     closeImageMenu();
   };
 
@@ -243,7 +317,71 @@ export function FolderImageBoardsPage({
       const target = await uniqueTargetPath(activeItem.path, fileName);
       await electron.copyFile(input, target);
     }
-    await loadImages(activeItem.path);
+    await loadBoardMedia(activeItem.path);
+  };
+
+  const renameMediaItem = async () => {
+    if (!activeItem || !mediaRenameTarget) return;
+
+    const sourceName = mediaRenameTarget.name;
+    const sourceExt = getFileExtension(sourceName);
+    const raw = mediaRenameValue.trim();
+    let nextName = normalizeName(raw);
+    if (!nextName) {
+      setMediaRenameError("Asset name cannot be empty.");
+      return;
+    }
+    if (!getFileExtension(nextName) && sourceExt) {
+      nextName = `${nextName}${sourceExt}`;
+    }
+
+    const nextExt = getFileExtension(nextName);
+    if (sourceExt.toLowerCase() !== nextExt.toLowerCase()) {
+      setMediaRenameError("File extension cannot be changed.");
+      return;
+    }
+    if (!isSupportedMediaFile(nextName)) {
+      setMediaRenameError("File type is not supported.");
+      return;
+    }
+    if (sourceName === nextName) {
+      setMediaRenameOpen(false);
+      setMediaRenameTarget(null);
+      setMediaRenameValue("");
+      setMediaRenameError(null);
+      return;
+    }
+    if (images.some((item) => item.path !== mediaRenameTarget.path && item.name.toLowerCase() === nextName.toLowerCase())) {
+      setMediaRenameError("A file with this name already exists.");
+      return;
+    }
+
+    const nextPath = joinPath(activeItem.path, nextName);
+
+    try {
+      await electron.rename(mediaRenameTarget.path, nextPath);
+      await renameLinkedThumbnail(mediaRenameTarget.path, nextPath);
+
+      const sourceKey = sourceName.toLowerCase();
+      const nextFavorites = favoriteNames.map((name) => (name.toLowerCase() === sourceKey ? nextName : name));
+      const resolved = resolveFavoritesAgainstFiles(
+        images
+          .filter((item) => item.path !== mediaRenameTarget.path)
+          .map((item) => item.name)
+          .concat(nextName),
+        nextFavorites,
+      );
+      await saveBoardFavorites(activeItem.path, resolved);
+
+      setPreviewIndex(null);
+      setMediaRenameOpen(false);
+      setMediaRenameTarget(null);
+      setMediaRenameValue("");
+      setMediaRenameError(null);
+      await loadBoardMedia(activeItem.path);
+    } catch (error) {
+      setMediaRenameError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const closePreview = () => {
@@ -252,41 +390,6 @@ export function FolderImageBoardsPage({
 
   const currentImage = previewIndex === null ? null : images[previewIndex] ?? null;
   const currentIsVideo = currentImage ? inferMediaKind(currentImage.path) === "video" : false;
-
-  useEffect(() => {
-    if (!currentImage) {
-      setPreviewSize(null);
-      return;
-    }
-    let canceled = false;
-    if (isVideoFile(currentImage.path)) {
-      const video = document.createElement("video");
-      video.preload = "metadata";
-      video.onloadedmetadata = () => {
-        if (canceled) return;
-        setPreviewSize({ width: video.videoWidth, height: video.videoHeight });
-      };
-      video.onerror = () => {
-        if (canceled) return;
-        setPreviewSize(null);
-      };
-      video.src = toFileUrl(currentImage.path);
-    } else {
-      const img = new Image();
-      img.onload = () => {
-        if (canceled) return;
-        setPreviewSize({ width: img.naturalWidth, height: img.naturalHeight });
-      };
-      img.onerror = () => {
-        if (canceled) return;
-        setPreviewSize(null);
-      };
-      img.src = toFileUrl(currentImage.path);
-    }
-    return () => {
-      canceled = true;
-    };
-  }, [currentImage?.path]);
 
   useEffect(() => {
     if (previewIndex === null) return;
@@ -309,7 +412,7 @@ export function FolderImageBoardsPage({
     setConfirmOpen(false);
     setConfirmTarget(null);
     if (activeItem) {
-      await loadImages(activeItem.path);
+      await loadBoardMedia(activeItem.path);
     }
     setPreviewIndex(null);
   };
@@ -372,8 +475,28 @@ export function FolderImageBoardsPage({
               <MediaTileGrid
                 items={mediaItems}
                 getKey={(item) => item.path}
+                getTileClassName={(item) => `moodboard-tile${item.isFavorite ? " moodboard-tile--favorite" : ""}`}
+                actionsPlacement="image-bottom-right"
                 onOpen={(_item, idx) => setPreviewIndex(idx)}
                 onContextMenu={(event, item) => openImageMenu(event, item)}
+                renderActions={(item) => (
+                  <button
+                    type="button"
+                    className={`moodboard-favorite-toggle${item.isFavorite ? " moodboard-favorite-toggle--active" : ""}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void toggleFavorite(item);
+                    }}
+                    aria-label={item.isFavorite ? "Unfavorite" : "Set favorite"}
+                    title={item.isFavorite ? "Unfavorite" : "Set favorite"}
+                  >
+                    <img
+                      src={item.isFavorite ? "icons/favorite_active.png" : "icons/favorite_not_active.png"}
+                      alt=""
+                      aria-hidden
+                    />
+                  </button>
+                )}
               />
             </>
           )}
@@ -457,12 +580,54 @@ export function FolderImageBoardsPage({
         </div>
       ) : null}
 
+      {mediaRenameOpen && mediaRenameTarget ? (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <div className="modal__header">
+              <h3 className="modal__title">Rename Asset</h3>
+            </div>
+            <div className="form-section">
+              <label className="form-row">
+                <span className="section-title">Name</span>
+                <input
+                  className="form-input"
+                  value={mediaRenameValue}
+                  onChange={(event) => setMediaRenameValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      void renameMediaItem();
+                    }
+                  }}
+                />
+              </label>
+            </div>
+            {mediaRenameError ? <p className="error">{mediaRenameError}</p> : null}
+            <div className="modal__footer">
+              <button
+                type="button"
+                className="pill-button"
+                onClick={() => {
+                  setMediaRenameOpen(false);
+                  setMediaRenameTarget(null);
+                  setMediaRenameValue("");
+                  setMediaRenameError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button type="button" className="pill-button" onClick={() => void renameMediaItem()}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <MediaLightbox
         open={previewIndex !== null && Boolean(currentImage)}
         path={currentImage?.path ?? null}
         isVideo={currentIsVideo}
         name={currentImage?.name}
-        meta={previewSize ? `(${previewSize.width}x${previewSize.height})` : undefined}
         onClose={closePreview}
         onNext={() => {
           if (!images.length) return;
@@ -502,6 +667,9 @@ export function FolderImageBoardsPage({
             <button type="button" className="context-menu__item" onClick={() => void openInExplorer(menuItem)}>
               {revealLabel}
             </button>
+            <button type="button" className="context-menu__item" onClick={() => void copyBoardPathToClipboard(menuItem)}>
+              Copy as Path
+            </button>
             <button type="button" className="context-menu__item" onClick={() => startRename(menuItem)}>
               Rename
             </button>
@@ -514,6 +682,24 @@ export function FolderImageBoardsPage({
         position={imageMenuPos}
         onClose={closeImageMenu}
         actions={[
+          {
+            key: "favorite",
+            label: imageMenuItem?.isFavorite ? "Unfavorite" : "Set favorite",
+            visible: Boolean(imageMenuItem),
+            onSelect: async () => {
+              if (!imageMenuItem) return;
+              await toggleFavorite(imageMenuItem);
+            },
+          },
+          {
+            key: "rename",
+            label: "Rename...",
+            visible: Boolean(imageMenuItem),
+            onSelect: async () => {
+              if (!imageMenuItem) return;
+              startMediaRename(imageMenuItem);
+            },
+          },
           {
             key: "open-ps",
             label: "Open in Photoshop",
@@ -539,6 +725,15 @@ export function FolderImageBoardsPage({
             onSelect: async () => {
               if (!imageMenuItem) return;
               await revealImageInExplorer(imageMenuItem);
+            },
+          },
+          {
+            key: "copy-path",
+            label: "Copy as Path",
+            visible: Boolean(imageMenuItem),
+            onSelect: async () => {
+              if (!imageMenuItem) return;
+              await copyMediaPathToClipboard(imageMenuItem);
             },
           },
         ]}
@@ -603,6 +798,62 @@ function getBaseName(path: string): string {
   const normalized = path.replace(/\\/g, "/");
   const idx = normalized.lastIndexOf("/");
   return idx === -1 ? normalized : normalized.slice(idx + 1);
+}
+
+function getFileExtension(fileName: string): string {
+  const idx = fileName.lastIndexOf(".");
+  if (idx <= 0 || idx === fileName.length - 1) {
+    return "";
+  }
+  return fileName.slice(idx);
+}
+
+function resolveFavoritesAgainstFiles(fileNames: string[], favorites: string[]): string[] {
+  const fileLookup = new Map(fileNames.map((name) => [name.toLowerCase(), name]));
+  const seen = new Set<string>();
+  const resolved: string[] = [];
+  for (const favorite of favorites) {
+    const key = favorite.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    const existing = fileLookup.get(key);
+    if (!existing) continue;
+    seen.add(key);
+    resolved.push(existing);
+  }
+  return resolved;
+}
+
+function areStringArraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+async function renameLinkedThumbnail(sourcePath: string, nextPath: string): Promise<void> {
+  if (inferMediaKind(sourcePath) !== "image") {
+    return;
+  }
+  const sourceThumbnailPath = getImageThumbnailPath(sourcePath);
+  const nextThumbnailPath = getImageThumbnailPath(nextPath);
+  if (sourceThumbnailPath === nextThumbnailPath) {
+    return;
+  }
+
+  const sourceThumbnailExists = await electron.exists(sourceThumbnailPath);
+  if (!sourceThumbnailExists) {
+    return;
+  }
+
+  await electron.ensureDir(getDirectoryName(nextThumbnailPath));
+  const nextThumbnailExists = await electron.exists(nextThumbnailPath);
+  if (nextThumbnailExists) {
+    await electron.deleteFile(sourceThumbnailPath);
+    return;
+  }
+
+  await electron.rename(sourceThumbnailPath, nextThumbnailPath);
 }
 
 async function uniqueTargetPath(dir: string, fileName: string): Promise<string> {

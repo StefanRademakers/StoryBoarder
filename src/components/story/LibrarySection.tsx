@@ -145,6 +145,11 @@ export function LibrarySection({
     closeMenu();
   };
 
+  const copyPathToClipboard = async (note: LibraryItem) => {
+    await electron.copyPathToClipboard(note.path);
+    closeMenu();
+  };
+
   const confirmDelete = async () => {
     if (!confirmTarget) return;
     await electron.deleteFile(confirmTarget.path);
@@ -307,6 +312,9 @@ export function LibrarySection({
           >
             <button type="button" className="context-menu__item" onClick={() => void revealInFileManager(menuItem)}>
               {revealLabel}
+            </button>
+            <button type="button" className="context-menu__item" onClick={() => void copyPathToClipboard(menuItem)}>
+              Copy as Path
             </button>
             <button type="button" className="context-menu__item" onClick={() => requestDelete(menuItem)}>
               Delete

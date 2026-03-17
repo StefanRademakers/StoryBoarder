@@ -434,6 +434,14 @@ ipcMain.handle("fs:copy-image-to-clipboard", async (_event, { path: targetPath }
     return false;
   }
 });
+ipcMain.handle("fs:copy-path-to-clipboard", async (_event, { path: targetPath }: { path: string }) => {
+  try {
+    clipboard.writeText(path.normalize(targetPath));
+    return true;
+  } catch {
+    return false;
+  }
+});
 
 ipcMain.handle("fs:get-path", async (_event, { kind }: { kind: AppPathKind }) => {
   return app.getPath(kind);

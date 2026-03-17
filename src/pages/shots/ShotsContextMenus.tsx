@@ -1,5 +1,6 @@
 import { MediaContextMenu } from "../../components/common/MediaContextMenu";
 import { inferMediaKind } from "../../components/common/mediaTypes";
+import { electron } from "../../services/electron";
 import type { CandidateAsset, ScenePoolAsset, ShotDisplayMode, ShotModeAsset } from "./types";
 
 interface Position {
@@ -137,6 +138,16 @@ export function ShotsContextMenus({
               await onRevealMenuShotInExplorer();
             },
           },
+          {
+            key: "copy-path",
+            label: "Copy as Path",
+            visible: Boolean(menuShotAssetPath),
+            onSelect: async () => {
+              if (!menuShotAssetPath) return;
+              await electron.copyPathToClipboard(menuShotAssetPath);
+              onCloseImageMenu();
+            },
+          },
         ]}
       />
 
@@ -185,6 +196,16 @@ export function ShotsContextMenus({
               await onRevealVersionAssetInExplorer();
             },
           },
+          {
+            key: "copy-path",
+            label: "Copy as Path",
+            visible: Boolean(versionMenuAsset),
+            onSelect: async () => {
+              if (!versionMenuAsset) return;
+              await electron.copyPathToClipboard(versionMenuAsset.path);
+              onCloseVersionMenu();
+            },
+          },
         ]}
       />
 
@@ -217,6 +238,16 @@ export function ShotsContextMenus({
               await onRevealPoolAssetInExplorer();
             },
           },
+          {
+            key: "copy-path",
+            label: "Copy as Path",
+            visible: Boolean(poolMenuAsset),
+            onSelect: async () => {
+              if (!poolMenuAsset) return;
+              await electron.copyPathToClipboard(poolMenuAsset.path);
+              onClosePoolMenu();
+            },
+          },
         ]}
       />
 
@@ -239,6 +270,16 @@ export function ShotsContextMenus({
             visible: Boolean(candidateMenuAsset),
             onSelect: async () => {
               await onRevealCandidateAssetInExplorer();
+            },
+          },
+          {
+            key: "copy-path",
+            label: "Copy as Path",
+            visible: Boolean(candidateMenuAsset),
+            onSelect: async () => {
+              if (!candidateMenuAsset) return;
+              await electron.copyPathToClipboard(candidateMenuAsset.path);
+              onCloseCandidateMenu();
             },
           },
         ]}

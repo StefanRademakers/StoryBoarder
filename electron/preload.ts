@@ -15,6 +15,7 @@ const api: IElectronAPI & { saveClipboardImage: (buffer: ArrayBuffer) => Promise
   revealInFileManager: (path) => ipcRenderer.invoke("fs:reveal-in-file-manager", { path }) as Promise<boolean>,
   openWithApp: (appPath, targetPath) => ipcRenderer.invoke("fs:open-with-app", { appPath, targetPath }) as Promise<boolean>,
   copyImageToClipboard: (path) => ipcRenderer.invoke("fs:copy-image-to-clipboard", { path }) as Promise<boolean>,
+  copyPathToClipboard: (path) => ipcRenderer.invoke("fs:copy-path-to-clipboard", { path }) as Promise<boolean>,
   copyFile: (from, to) => ipcRenderer.invoke("fs:copy-file", { from, to }),
   copyDir: (from, to) => ipcRenderer.invoke("fs:copy-dir", { from, to }),
   deleteFile: (path) => ipcRenderer.invoke("fs:delete-file", { path }),

@@ -1,4 +1,4 @@
-import { toFileUrl } from "../../utils/path";
+import { MediaSurface } from "../../components/common/MediaSurface";
 import { formatDurationLabel, playbackModeLabel } from "./utils";
 import type { PlaybackMedia } from "./types";
 
@@ -55,17 +55,23 @@ export function ShotsPlaybackOverlay({
 
         <div className="shots-playback__media">
           {playbackMedia.kind === "video" ? (
-            <video
+            <MediaSurface
               key={playbackMedia.path}
-              src={toFileUrl(playbackMedia.path)}
+              path={playbackMedia.path}
+              kind="video"
+              variant="playback"
               autoPlay
               muted
-              playsInline
               onEnded={() => onStep(1)}
               onError={() => onStep(1)}
             />
           ) : playbackMedia.kind === "image" ? (
-            <img src={toFileUrl(playbackMedia.path)} alt={playbackShot.description || "Shot preview"} />
+            <MediaSurface
+              path={playbackMedia.path}
+              kind="image"
+              variant="playback"
+              alt={playbackShot.description || "Shot preview"}
+            />
           ) : (
             <div className="shots-playback__empty shots-playback__empty--numbered">
               <div className="shots-playback__empty-number">{String(playbackIndex + 1).padStart(2, "0")}</div>

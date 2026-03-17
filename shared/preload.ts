@@ -36,6 +36,7 @@ export interface IElectronAPI {
   revealInFileManager(path: string): Promise<boolean>;
   openWithApp(appPath: string, targetPath: string): Promise<boolean>;
   copyImageToClipboard(path: string): Promise<boolean>;
+  copyPathToClipboard(path: string): Promise<boolean>;
   copyFile(from: string, to: string): Promise<void>;
   copyDir(from: string, to: string): Promise<void>;
   deleteFile(path: string): Promise<void>;

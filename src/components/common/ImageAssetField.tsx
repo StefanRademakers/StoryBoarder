@@ -88,6 +88,17 @@ export function ImageAssetField({
     closeMenu();
   };
 
+  const copyPath = async () => {
+    if (!imagePath) return;
+    const ok = await electron.copyPathToClipboard(imagePath);
+    if (!ok) {
+      setActionError("Failed to copy path.");
+    } else {
+      setActionError(null);
+    }
+    closeMenu();
+  };
+
   return (
     <div className="image-asset-field">
       {actionError ? <p className="error">{actionError}</p> : null}
@@ -175,6 +186,14 @@ export function ImageAssetField({
             visible: Boolean(imagePath),
             onSelect: async () => {
               await revealInExplorer();
+            },
+          },
+          {
+            key: "copy-path",
+            label: "Copy as Path",
+            visible: Boolean(imagePath),
+            onSelect: async () => {
+              await copyPath();
             },
           },
         ]}

@@ -145,6 +145,8 @@ export function useShotsExport<TShot>({
             backgroundColor: "#ffffff",
             resizeToMaxLongestEdge: exportResizeEnabled,
             maxLongestEdge,
+            saveJpegCopy: true,
+            jpegQuality: 80,
             outputPath,
           },
         },

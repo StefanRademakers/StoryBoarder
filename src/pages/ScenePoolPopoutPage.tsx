@@ -7,22 +7,12 @@ import { MediaTileGrid } from "../components/common/MediaTileGrid";
 import { MediaLightbox } from "../components/common/MediaLightbox";
 import { MediaContextMenu } from "../components/common/MediaContextMenu";
 import { inferMediaKind, type MediaItem } from "../components/common/mediaTypes";
+import { listScenePoolAssets, loadScenesIndex } from "./shots/shotsRepository";
 
 interface ScenePoolPopoutPageProps {
   project: ProjectState;
   sceneId: string;
   title: string;
-}
-
-interface SceneMeta {
-  id: string;
-  name: string;
-  characterPropBoards?: string[];
-  moodboards?: string[];
-}
-
-interface ScenesIndex {
-  scenes: SceneMeta[];
 }
 
 interface ScenePoolAsset {
@@ -52,55 +42,18 @@ export function ScenePoolPopoutPage({ project, sceneId, title }: ScenePoolPopout
     const load = async () => {
       setLoading(true);
       try {
-        const indexPath = joinPath(joinPath(project.paths.root, "scenes"), "scenes.json");
-        const exists = await electron.exists(indexPath);
-        if (!exists) {
-          setAssets([]);
-          return;
-        }
-        const text = await electron.readText(indexPath);
-        const parsed = JSON.parse(text) as ScenesIndex;
-        const scene = (parsed.scenes ?? []).find((entry) => entry.id === sceneId);
+        const scenesRoot = joinPath(project.paths.root, "scenes");
+        const indexPath = joinPath(scenesRoot, "scenes.json");
+        const normalized = await loadScenesIndex(scenesRoot, indexPath);
+        const scene = normalized.scenes.find((entry) => entry.id === sceneId);
         if (!scene) {
           setAssets([]);
           return;
         }
         setSceneName(scene.name || sceneId);
-
-        const refs: Array<{ rootFolder: "characters" | "moodboards"; boardName: string }> = [];
-        for (const boardName of normalizeBoardRefs(scene.characterPropBoards)) {
-          refs.push({ rootFolder: "characters", boardName });
-        }
-        for (const boardName of normalizeBoardRefs(scene.moodboards)) {
-          refs.push({ rootFolder: "moodboards", boardName });
-        }
-
-        const rows: ScenePoolAsset[] = [];
-        for (const ref of refs) {
-          const boardDir = joinPath(joinPath(project.paths.root, ref.rootFolder), ref.boardName);
-          const boardExists = await electron.exists(boardDir);
-          if (!boardExists) continue;
-          const entries = await electron.listDir(boardDir);
-          for (const entry of entries) {
-            if (!entry.isFile || !isPoolMediaFile(entry.name)) continue;
-            const filePath = joinPath(boardDir, entry.name);
-            const stat = await electron.stat(filePath);
-            rows.push({
-              name: entry.name,
-              path: filePath,
-              source: `${ref.rootFolder}/${ref.boardName}`,
-              mtimeMs: stat?.mtimeMs ?? 0,
-            });
-          }
-        }
-
-        rows.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
-        const unique = new Map<string, ScenePoolAsset>();
-        for (const row of rows) {
-          if (!unique.has(row.path)) unique.set(row.path, row);
-        }
+        const rows = await listScenePoolAssets(project.paths.root, scene);
         if (cancelled) return;
-        setAssets(Array.from(unique.values()));
+        setAssets(rows);
       } catch {
         if (cancelled) return;
         setAssets([]);
@@ -218,40 +171,19 @@ export function ScenePoolPopoutPage({ project, sceneId, title }: ScenePoolPopout
               closeMenu();
             },
           },
+          {
+            key: "copy-path",
+            label: "Copy as Path",
+            visible: Boolean(menuAsset),
+            onSelect: async () => {
+              if (!menuAsset) return;
+              await electron.copyPathToClipboard(menuAsset.path);
+              closeMenu();
+            },
+          },
         ]}
       />
     </div>
-  );
-}
-
-function normalizeBoardRefs(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const entry of value) {
-    if (typeof entry !== "string") continue;
-    const cleaned = entry.trim();
-    if (!cleaned || seen.has(cleaned)) continue;
-    seen.add(cleaned);
-    out.push(cleaned);
-    if (out.length >= 5) break;
-  }
-  return out;
-}
-
-function isPoolMediaFile(name: string): boolean {
-  const lower = name.toLowerCase();
-  return (
-    lower.endsWith(".png")
-    || lower.endsWith(".jpg")
-    || lower.endsWith(".jpeg")
-    || lower.endsWith(".webp")
-    || lower.endsWith(".mp4")
-    || lower.endsWith(".mov")
-    || lower.endsWith(".webm")
-    || lower.endsWith(".mkv")
-    || lower.endsWith(".avi")
-    || lower.endsWith(".m4v")
   );
 }
 

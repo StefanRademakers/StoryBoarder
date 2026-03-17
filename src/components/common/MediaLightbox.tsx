@@ -1,4 +1,5 @@
-import { useEffect, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { MediaSurface } from "./MediaSurface";
 import { toFileUrl } from "../../utils/path";
 
 interface MediaLightboxProps {
@@ -28,6 +29,8 @@ export function MediaLightbox({
   onReveal,
   onContextMenu,
 }: MediaLightboxProps) {
+  const [mediaSize, setMediaSize] = useState<{ width: number; height: number } | null>(null);
+
   useEffect(() => {
     if (!open || !path) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -59,6 +62,63 @@ export function MediaLightbox({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose, onCopy, onNext, onPrev, onReveal, open, path]);
+
+  useEffect(() => {
+    if (!open || !path) {
+      setMediaSize(null);
+      return;
+    }
+
+    let cancelled = false;
+    const src = toFileUrl(path);
+
+    if (isVideo) {
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      video.onloadedmetadata = () => {
+        if (cancelled) return;
+        setMediaSize({ width: video.videoWidth, height: video.videoHeight });
+      };
+      video.onerror = () => {
+        if (cancelled) return;
+        setMediaSize(null);
+      };
+      video.src = src;
+      return () => {
+        cancelled = true;
+        video.src = "";
+      };
+    }
+
+    const image = new Image();
+    image.onload = () => {
+      if (cancelled) return;
+      setMediaSize({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      if (cancelled) return;
+      setMediaSize(null);
+    };
+    image.src = src;
+    return () => {
+      cancelled = true;
+      image.src = "";
+    };
+  }, [isVideo, open, path]);
+
+  const metaLine = useMemo(() => {
+    const parts: string[] = [];
+    if (name) {
+      parts.push(name);
+    }
+    if (mediaSize) {
+      parts.push(`${mediaSize.width}x${mediaSize.height}`);
+    }
+    if (meta) {
+      parts.push(meta);
+    }
+    return parts.join(" · ");
+  }, [mediaSize, meta, name]);
 
   if (!open || !path) return null;
 
@@ -92,18 +152,15 @@ export function MediaLightbox({
           </button>
         </div>
         <div className="moodboard-preview__media">
-          {isVideo ? (
-            <video src={toFileUrl(path)} controls autoPlay playsInline />
-          ) : (
-            <img src={toFileUrl(path)} alt="" />
-          )}
+          <MediaSurface
+            path={path}
+            kind={isVideo ? "video" : "image"}
+            variant="lightbox"
+            controls={isVideo}
+            autoPlay={isVideo}
+          />
         </div>
-        {(name || meta) ? (
-          <div className="moodboard-preview__name">
-            {name ?? ""}
-            {meta ? ` ${meta}` : ""}
-          </div>
-        ) : null}
+        {metaLine ? <div className="moodboard-preview__name">{metaLine}</div> : null}
       </div>
     </div>
   );

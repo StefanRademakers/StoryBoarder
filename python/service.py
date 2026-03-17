@@ -47,7 +47,9 @@ def handle_create_image_grid(payload: dict) -> dict:
     if not isinstance(data, dict):
         data = {}
     result = create_image_grid(paths, data=data)
-    return {"message": result}
+    if isinstance(result, dict):
+        return result
+    return {"message": str(result)}
 
 
 def handle_export_fcp7_shots(payload: dict) -> dict:
