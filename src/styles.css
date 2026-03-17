@@ -1505,12 +1505,6 @@ button {
   flex-wrap: wrap;
 }
 
-.html-export-dialog__scope {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 .shot-versions-grid__actions {
   display: flex;
   gap: 8px;

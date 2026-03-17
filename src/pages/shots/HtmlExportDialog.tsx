@@ -1,9 +1,13 @@
 import { SegmentedControl, type SegmentedControlOption } from "../../components/common/SegmentedControl";
 import { ToggleButtonGroup, type ToggleButtonOption } from "../../components/common/ToggleButtonGroup";
 import type { ShotDisplayMode } from "./types";
-
-export type HtmlExportImageFormat = "jpg80" | "png";
-export type HtmlExportSceneScope = "current" | "all";
+import {
+  HTML_EXPORT_FORMAT_OPTIONS,
+  HTML_EXPORT_MODE_DEFINITIONS,
+  HTML_EXPORT_SCENE_SCOPE_OPTIONS,
+  type HtmlExportImageFormat,
+  type HtmlExportSceneScope,
+} from "./htmlExportConfig";
 
 interface HtmlExportDialogProps {
   open: boolean;
@@ -22,38 +26,14 @@ interface HtmlExportDialogProps {
   onExport: () => void;
 }
 
-const MODE_OPTIONS: Array<ToggleButtonOption<ShotDisplayMode>> = [
-  {
-    value: "concept",
-    label: "Concept",
-    icon: <img src="icons/concept.png" width={16} height={16} alt="" aria-hidden />,
-  },
-  {
-    value: "still",
-    label: "Still",
-    icon: <img src="icons/still.png" width={16} height={16} alt="" aria-hidden />,
-  },
-  {
-    value: "clip",
-    label: "Clip",
-    icon: <img src="icons/clip.png" width={16} height={16} alt="" aria-hidden />,
-  },
-  {
-    value: "performance",
-    label: "Performance",
-    icon: <img src="icons/clip.png" width={16} height={16} alt="" aria-hidden />,
-  },
-  {
-    value: "reference",
-    label: "Reference",
-    icon: <img src="icons/still.png" width={16} height={16} alt="" aria-hidden />,
-  },
-];
+const MODE_OPTIONS: Array<ToggleButtonOption<ShotDisplayMode>> = HTML_EXPORT_MODE_DEFINITIONS.map((item) => ({
+  value: item.value,
+  label: item.label,
+  icon: <img src={item.iconPath} width={16} height={16} alt="" aria-hidden />,
+}));
 
-const FORMAT_OPTIONS: Array<SegmentedControlOption<HtmlExportImageFormat>> = [
-  { value: "jpg80", label: "JPG 80%" },
-  { value: "png", label: "PNG" },
-];
+const FORMAT_OPTIONS: Array<SegmentedControlOption<HtmlExportImageFormat>> = [...HTML_EXPORT_FORMAT_OPTIONS];
+const SCENE_SCOPE_OPTIONS: Array<SegmentedControlOption<HtmlExportSceneScope>> = [...HTML_EXPORT_SCENE_SCOPE_OPTIONS];
 
 export function HtmlExportDialog({
   open,
@@ -128,24 +108,12 @@ export function HtmlExportDialog({
           </label>
           <label className="form-row">
             <span className="section-title">Scene scope:</span>
-            <div className="html-export-dialog__scope">
-              <label className="export-grid-resize-row">
-                <input
-                  type="checkbox"
-                  checked={sceneScope === "current"}
-                  onChange={() => onChangeSceneScope("current")}
-                />
-                <span>export current scene</span>
-              </label>
-              <label className="export-grid-resize-row">
-                <input
-                  type="checkbox"
-                  checked={sceneScope === "all"}
-                  onChange={() => onChangeSceneScope("all")}
-                />
-                <span>export all scenes</span>
-              </label>
-            </div>
+            <SegmentedControl
+              ariaLabel="HTML export scene scope"
+              options={SCENE_SCOPE_OPTIONS}
+              value={sceneScope}
+              onChange={onChangeSceneScope}
+            />
           </label>
           {!selectedModes.length ? <p className="muted">Select at least one mode.</p> : null}
         </div>

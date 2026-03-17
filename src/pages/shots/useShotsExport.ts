@@ -1,8 +1,14 @@
 import { useCallback, useState } from "react";
 import { electron } from "../../services/electron";
 import { joinPath } from "../../utils/path";
-import type { HtmlExportImageFormat, HtmlExportSceneScope } from "./HtmlExportDialog";
 import type { ShotDisplayMode } from "./types";
+import {
+  HTML_EXPORT_ALLOWED_MODES,
+  HTML_EXPORT_DEFAULT_MODES,
+  HTML_EXPORT_SCHEMA_VERSION,
+  type HtmlExportImageFormat,
+  type HtmlExportSceneScope,
+} from "./htmlExportConfig";
 import { parsePositiveInteger, sanitizeFileName, toErrorMessage } from "./utils";
 
 interface ActiveSceneLike {
@@ -27,6 +33,7 @@ interface UseShotsExportParams<TShot> {
   resolveFavoriteClipPath: (shot: TShot) => string;
   resolveShotDescription?: (shot: TShot) => string | null | undefined;
   resolveShotDetails?: (shot: TShot) => Record<string, string | number | null | undefined>;
+  resolveShotMediaCandidatesForScene?: (sceneId: string, shot: TShot, mode: ShotDisplayMode) => string[];
 }
 
 interface UseShotsExportResult {
@@ -64,7 +71,32 @@ interface UseShotsExportResult {
   exportSceneHtml: () => Promise<void>;
 }
 
-const HTML_EXPORT_DEFAULT_MODES: ShotDisplayMode[] = ["concept", "still", "clip", "performance", "reference"];
+interface HtmlExportShotPayload {
+  shotNumber: number;
+  description: string;
+  details: Record<string, string | number | null | undefined>;
+  mediaByMode: Partial<Record<ShotDisplayMode, string>>;
+  mediaCandidatesByMode: Partial<Record<ShotDisplayMode, string[]>>;
+}
+
+interface HtmlExportScenePayload {
+  sceneId: string;
+  sceneName: string;
+  shots: HtmlExportShotPayload[];
+}
+
+interface HtmlExportCommandPayload {
+  schemaVersion: number;
+  projectRoot: string;
+  imageFormat: HtmlExportImageFormat;
+  selectedModes: ShotDisplayMode[];
+  scenes: HtmlExportScenePayload[];
+}
+
+interface HtmlExportCommandResponseData {
+  outputDir?: string;
+  count?: number;
+}
 
 function fileExtension(value: string): string {
   const normalized = value.replace(/\\/g, "/");
@@ -94,6 +126,7 @@ export function useShotsExport<TShot>({
   resolveFavoriteClipPath,
   resolveShotDescription,
   resolveShotDetails,
+  resolveShotMediaCandidatesForScene,
 }: UseShotsExportParams<TShot>): UseShotsExportResult {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportColumnsText, setExportColumnsText] = useState("2");
@@ -338,7 +371,7 @@ export function useShotsExport<TShot>({
 
   const exportSceneHtml = useCallback(async () => {
     if (gridExportBusy) return;
-    const selectedModes = htmlExportModes.filter((mode) => HTML_EXPORT_DEFAULT_MODES.includes(mode));
+    const selectedModes = htmlExportModes.filter((mode) => HTML_EXPORT_ALLOWED_MODES.includes(mode));
     if (!selectedModes.length) {
       setGridExportMessage("Html Export failed: select at least one mode.");
       return;
@@ -346,7 +379,7 @@ export function useShotsExport<TShot>({
 
     const startRaw = parsePositiveInteger(htmlExportStartIndexText);
     const endRaw = parsePositiveInteger(htmlExportEndIndexText);
-    const buildScenePayload = (sceneId: string, sceneName: string, sceneShots: TShot[]) => {
+    const buildScenePayload = (sceneId: string, sceneName: string, sceneShots: TShot[]): HtmlExportScenePayload | null => {
       const totalShots = sceneShots.length;
       if (!totalShots) return null;
       const startIndex = Math.max(1, Math.min(totalShots, startRaw ?? 1));
@@ -356,19 +389,30 @@ export function useShotsExport<TShot>({
       return {
         sceneId,
         sceneName,
-        shots: exportShots.map((shot, idx) => ({
-          shotNumber: startIndex + idx,
-          description: resolveShotDescription?.(shot)?.trim() ?? "",
-          details: resolveShotDetails?.(shot) ?? {},
-          mediaByMode: selectedModes.reduce<Record<string, string>>((acc, mode) => {
-            acc[mode] = resolveShotAssetPathForScene(sceneId, shot, mode);
-            return acc;
-          }, {}),
-        })),
+        shots: exportShots.map((shot, idx): HtmlExportShotPayload => {
+          const mediaByMode: Partial<Record<ShotDisplayMode, string>> = {};
+          const mediaCandidatesByMode: Partial<Record<ShotDisplayMode, string[]>> = {};
+          for (const mode of selectedModes) {
+            const primary = resolveShotAssetPathForScene(sceneId, shot, mode).trim();
+            mediaByMode[mode] = primary;
+            const candidatesRaw = resolveShotMediaCandidatesForScene?.(sceneId, shot, mode) ?? [];
+            const candidates = Array.from(new Set([primary, ...candidatesRaw].map((value) => value.trim()).filter(Boolean)));
+            if (candidates.length) {
+              mediaCandidatesByMode[mode] = candidates;
+            }
+          }
+          return {
+            shotNumber: startIndex + idx,
+            description: resolveShotDescription?.(shot)?.trim() ?? "",
+            details: resolveShotDetails?.(shot) ?? {},
+            mediaByMode,
+            mediaCandidatesByMode,
+          };
+        }),
       };
     };
 
-    const payloadScenes: Array<{ sceneId: string; sceneName: string; shots: Array<Record<string, unknown>> }> = [];
+    const payloadScenes: HtmlExportScenePayload[] = [];
     if (htmlExportSceneScope === "all") {
       for (const scene of exportScenes) {
         const sceneShots = scene.id === activeScene?.id ? shots : await loadShotsForScene(scene.id);
@@ -396,25 +440,28 @@ export function useShotsExport<TShot>({
     setGridExportBusy(true);
     setGridExportMessage(null);
     try {
+      const payload: HtmlExportCommandPayload = {
+        schemaVersion: HTML_EXPORT_SCHEMA_VERSION,
+        projectRoot,
+        imageFormat: htmlExportImageFormat,
+        selectedModes,
+        scenes: payloadScenes,
+      };
       const response = await electron.runPythonCommand(
         "export_html_shots",
-        {
-          projectRoot,
-          imageFormat: htmlExportImageFormat,
-          selectedModes,
-          scenes: payloadScenes,
-        },
+        payload,
         { timeoutMs: 180000 },
       );
       if (!response.ok) {
         setGridExportMessage(`Html Export failed: ${response.error.message}`);
         return;
       }
-      const outputDir = typeof response.data?.outputDir === "string"
-        ? response.data.outputDir
+      const responseData = response.data as HtmlExportCommandResponseData | undefined;
+      const outputDir = typeof responseData?.outputDir === "string"
+        ? responseData.outputDir
         : joinPath(projectRoot, "exports");
-      const exportedCount = typeof response.data?.count === "number"
-        ? response.data.count
+      const exportedCount = typeof responseData?.count === "number"
+        ? responseData.count
         : payloadScenes.reduce((sum, scene) => sum + scene.shots.length, 0);
       setGridExportMessage(`Html Export completed (${exportedCount} shots).`);
       await electron.revealInFileManager(outputDir);
@@ -438,7 +485,7 @@ export function useShotsExport<TShot>({
     resolveShotAssetPathForScene,
     resolveShotDescription,
     resolveShotDetails,
-    activeScene,
+    resolveShotMediaCandidatesForScene,
     shots,
   ]);
 

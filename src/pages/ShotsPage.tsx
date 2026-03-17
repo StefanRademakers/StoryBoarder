@@ -987,6 +987,27 @@ export function ShotsPage({ project }: ShotsPageProps) {
     return joinPath(joinPath(scenesRoot, sceneId), relative);
   };
 
+  const shotAssetCandidatesForScene = (
+    sceneId: string,
+    shot: ShotItem,
+    mode: ShotDisplayMode = displayMode,
+  ): string[] => {
+    const favorite = getFavoriteRelative(shot, mode).replace(/\\/g, "/").trim();
+    const modeAssets = getModeAssets(shot, mode);
+    const candidates: string[] = [];
+    if (favorite && isFileAllowedForMode(favorite, mode)) {
+      candidates.push(favorite);
+    }
+    for (let idx = modeAssets.length - 1; idx >= 0; idx -= 1) {
+      const relative = modeAssets[idx].replace(/\\/g, "/").trim();
+      if (!relative || !isFileAllowedForMode(relative, mode)) {
+        continue;
+      }
+      candidates.push(relative);
+    }
+    return uniqueStrings(candidates).map((relative) => joinPath(joinPath(scenesRoot, sceneId), relative));
+  };
+
   const shotAssetPath = (shot: ShotItem, mode: ShotDisplayMode = displayMode): string => {
     if (!activeSceneId) return "";
     return shotAssetPathForScene(activeSceneId, shot, mode);
@@ -1089,6 +1110,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
     projectHeight,
     resolveShotAssetPath: (shot, mode) => shotAssetPath(shot, mode),
     resolveShotAssetPathForScene: (sceneId, shot, mode) => shotAssetPathForScene(sceneId, shot, mode),
+    resolveShotMediaCandidatesForScene: (sceneId, shot, mode) => shotAssetCandidatesForScene(sceneId, shot, mode),
     resolveFcp7Media: resolveShotAssetPathForFcp7,
     resolveFavoriteClipPath: resolveFavoriteClipPathForExport,
     resolveShotDescription: (shot) => shot.description,

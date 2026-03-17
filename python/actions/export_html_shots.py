@@ -5,12 +5,13 @@ import re
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional
 
 from PIL import Image, ImageOps
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
 ALLOWED_MODES = {"concept", "still", "clip", "performance", "reference"}
+SUPPORTED_SCHEMA_VERSION = 1
 MODE_LABELS = {
     "concept": "Concept",
     "still": "Still",
@@ -54,6 +55,14 @@ def _resolve_mode_list(raw_modes: Any) -> List[str]:
     return selected
 
 
+def _coerce_positive_int(value: Any, default: int) -> int:
+    try:
+        number = int(value)
+    except Exception:
+        return default
+    return number if number > 0 else default
+
+
 def _resolve_project_root(payload: Dict[str, Any]) -> Path:
     raw = str(payload.get("projectRoot") or "").strip()
     if not raw:
@@ -66,6 +75,138 @@ def _resolve_input_path(raw_path: str, project_root: Path) -> Path:
     if candidate.is_absolute():
         return candidate.resolve()
     return (project_root / candidate).resolve()
+
+
+def _normalize_media_by_mode(raw_media: Any, selected_modes: List[str]) -> Dict[str, str]:
+    if not isinstance(raw_media, dict):
+        return {}
+    normalized: Dict[str, str] = {}
+    for mode in selected_modes:
+        value = str(raw_media.get(mode) or "").strip()
+        if value:
+            normalized[mode] = value
+    return normalized
+
+
+def _normalize_media_candidates(raw_media_candidates: Any, selected_modes: List[str]) -> Dict[str, List[str]]:
+    if not isinstance(raw_media_candidates, dict):
+        return {}
+    normalized: Dict[str, List[str]] = {}
+    for mode in selected_modes:
+        raw_values = raw_media_candidates.get(mode)
+        if not isinstance(raw_values, list):
+            continue
+        values: List[str] = []
+        seen = set()
+        for raw in raw_values:
+            value = str(raw or "").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            values.append(value)
+        if values:
+            normalized[mode] = values
+    return normalized
+
+
+def _resolve_scene_inputs(payload: Dict[str, Any], selected_modes: List[str]) -> List[Dict[str, Any]]:
+    scene_inputs: List[Dict[str, Any]] = []
+    raw_scenes = payload.get("scenes")
+    if isinstance(raw_scenes, list):
+        for raw_scene in raw_scenes:
+            if not isinstance(raw_scene, dict):
+                continue
+            scene_id = _safe_utf8_text(raw_scene.get("sceneId") or raw_scene.get("id") or "scene").strip() or "scene"
+            scene_name = _safe_utf8_text(raw_scene.get("sceneName") or raw_scene.get("name") or "Scene").strip() or "Scene"
+            raw_shots = raw_scene.get("shots")
+            if not isinstance(raw_shots, list):
+                continue
+            shots: List[Dict[str, Any]] = []
+            for idx, raw_shot in enumerate(raw_shots):
+                if not isinstance(raw_shot, dict):
+                    continue
+                shot_number = _coerce_positive_int(raw_shot.get("shotNumber"), idx + 1)
+                description = _safe_utf8_text(raw_shot.get("description") or "")
+                details = raw_shot.get("details") if isinstance(raw_shot.get("details"), dict) else {}
+                media_by_mode = _normalize_media_by_mode(raw_shot.get("mediaByMode"), selected_modes)
+                media_candidates_by_mode = _normalize_media_candidates(raw_shot.get("mediaCandidatesByMode"), selected_modes)
+                shots.append(
+                    {
+                        "shotNumber": shot_number,
+                        "description": description,
+                        "details": details,
+                        "mediaByMode": media_by_mode,
+                        "mediaCandidatesByMode": media_candidates_by_mode,
+                    }
+                )
+            if shots:
+                scene_inputs.append({"sceneId": scene_id, "sceneName": scene_name, "shots": shots})
+
+    if scene_inputs:
+        return scene_inputs
+
+    # Backward compatibility for single-scene payload shape.
+    scene_id = _safe_utf8_text(payload.get("sceneId") or "scene").strip() or "scene"
+    scene_name = _safe_utf8_text(payload.get("sceneName") or "Scene").strip() or "Scene"
+    raw_shots = payload.get("shots")
+    if not isinstance(raw_shots, list):
+        raise ValueError("Missing or invalid 'scenes' / 'shots' payload.")
+
+    shots: List[Dict[str, Any]] = []
+    for idx, raw_shot in enumerate(raw_shots):
+        if not isinstance(raw_shot, dict):
+            continue
+        shot_number = _coerce_positive_int(raw_shot.get("shotNumber"), idx + 1)
+        description = _safe_utf8_text(raw_shot.get("description") or "")
+        details = raw_shot.get("details") if isinstance(raw_shot.get("details"), dict) else {}
+        media_by_mode = _normalize_media_by_mode(raw_shot.get("mediaByMode"), selected_modes)
+        media_candidates_by_mode = _normalize_media_candidates(raw_shot.get("mediaCandidatesByMode"), selected_modes)
+        shots.append(
+            {
+                "shotNumber": shot_number,
+                "description": description,
+                "details": details,
+                "mediaByMode": media_by_mode,
+                "mediaCandidatesByMode": media_candidates_by_mode,
+            }
+        )
+
+    if not shots:
+        raise ValueError("No valid shots found in payload.")
+    return [{"sceneId": scene_id, "sceneName": scene_name, "shots": shots}]
+
+
+def _iter_mode_paths(shot_payload: Dict[str, Any], mode: str) -> Iterable[str]:
+    # mediaCandidatesByMode is future-facing for version-aware exports.
+    media_candidates_by_mode = shot_payload.get("mediaCandidatesByMode")
+    if isinstance(media_candidates_by_mode, dict):
+        raw_candidates = media_candidates_by_mode.get(mode)
+        if isinstance(raw_candidates, list):
+            for raw in raw_candidates:
+                value = str(raw or "").strip()
+                if value:
+                    yield value
+
+    media_by_mode = shot_payload.get("mediaByMode")
+    if isinstance(media_by_mode, dict):
+        fallback = str(media_by_mode.get(mode) or "").strip()
+        if fallback:
+            yield fallback
+
+
+def _pick_existing_source(shot_payload: Dict[str, Any], mode: str, project_root: Path) -> Optional[Path]:
+    seen = set()
+    for raw_path in _iter_mode_paths(shot_payload, mode):
+        if raw_path in seen:
+            continue
+        seen.add(raw_path)
+        try:
+            source = _resolve_input_path(raw_path, project_root)
+        except Exception:
+            continue
+        if source.exists() and source.is_file():
+            return source
+    return None
 
 
 def _convert_image(source: Path, target: Path, image_format: str) -> None:
@@ -86,6 +227,21 @@ def _unique_export_dir(exports_root: Path, prefix: str) -> Path:
     seq = 2
     while True:
         candidate = exports_root / f"{prefix}_{stamp}_{seq}"
+        if not candidate.exists():
+            return candidate
+        seq += 1
+
+
+def _unique_target_path(directory: Path, file_name: str) -> Path:
+    safe_name = _sanitize_file_name(file_name) or "asset"
+    base = directory / safe_name
+    if not base.exists():
+        return base
+    stem = base.stem
+    suffix = base.suffix
+    seq = 2
+    while True:
+        candidate = directory / f"{stem}_{seq}{suffix}"
         if not candidate.exists():
             return candidate
         seq += 1
@@ -815,6 +971,12 @@ def _build_html(scene_name: str, cards: List[Dict[str, Any]], image_format: str,
 
 def export_html_shots(payload: Dict[str, Any]) -> Dict[str, Any]:
     project_root = _resolve_project_root(payload)
+    schema_version = _coerce_positive_int(payload.get("schemaVersion"), SUPPORTED_SCHEMA_VERSION)
+    if schema_version > SUPPORTED_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported 'schemaVersion': {schema_version}. "
+            f"Max supported is {SUPPORTED_SCHEMA_VERSION}."
+        )
     selected_modes = _resolve_mode_list(payload.get("selectedModes"))
     if not selected_modes:
         raise ValueError("Missing or invalid 'selectedModes'.")
@@ -823,25 +985,7 @@ def export_html_shots(payload: Dict[str, Any]) -> Dict[str, Any]:
     if image_format not in {"jpg80", "png"}:
         image_format = "jpg80"
 
-    scene_inputs: List[Dict[str, Any]] = []
-    raw_scenes = payload.get("scenes")
-    if isinstance(raw_scenes, list):
-        for raw_scene in raw_scenes:
-            if not isinstance(raw_scene, dict):
-                continue
-            scene_name = _safe_utf8_text(raw_scene.get("sceneName") or raw_scene.get("name") or "Scene").strip() or "Scene"
-            raw_shots = raw_scene.get("shots")
-            if not isinstance(raw_shots, list):
-                continue
-            scene_inputs.append({"sceneName": scene_name, "shots": raw_shots})
-
-    if not scene_inputs:
-        # Backward compatibility for single-scene payload shape.
-        scene_name = _safe_utf8_text(payload.get("sceneName") or "Scene").strip() or "Scene"
-        raw_shots = payload.get("shots")
-        if not isinstance(raw_shots, list):
-            raise ValueError("Missing or invalid 'shots'.")
-        scene_inputs.append({"sceneName": scene_name, "shots": raw_shots})
+    scene_inputs = _resolve_scene_inputs(payload, selected_modes)
 
     exports_root = project_root / "exports"
     output_dir = _unique_export_dir(exports_root, "html")
@@ -852,56 +996,43 @@ def export_html_shots(payload: Dict[str, Any]) -> Dict[str, Any]:
     media_count = 0
 
     for scene_input in scene_inputs:
+        scene_id = _safe_utf8_text(scene_input.get("sceneId") or "scene")
         scene_name = _safe_utf8_text(scene_input.get("sceneName") or "Scene")
         raw_shots = scene_input.get("shots")
         if not isinstance(raw_shots, list):
             continue
 
-        for idx, raw_shot in enumerate(raw_shots):
+        for raw_shot in raw_shots:
             if not isinstance(raw_shot, dict):
                 continue
-            shot_number = idx + 1
-            try:
-                parsed_number = int(raw_shot.get("shotNumber"))
-                if parsed_number > 0:
-                    shot_number = parsed_number
-            except Exception:
-                pass
+            shot_number = _coerce_positive_int(raw_shot.get("shotNumber"), 1)
 
             description = _safe_utf8_text(raw_shot.get("description") or "")
             details = raw_shot.get("details")
             if not isinstance(details, dict):
                 details = {}
 
-            media_by_mode = raw_shot.get("mediaByMode")
-            if not isinstance(media_by_mode, dict):
-                media_by_mode = {}
-
             card_media: List[Dict[str, Any]] = []
             for mode in selected_modes:
-                raw_path = str(media_by_mode.get(mode) or "").strip()
-                if not raw_path:
+                source = _pick_existing_source(raw_shot, mode, project_root)
+                if source is None:
                     card_media.append({"mode": mode, "kind": "missing"})
                     continue
 
-                source = _resolve_input_path(raw_path, project_root)
-                if not source.exists() or not source.is_file():
-                    card_media.append({"mode": mode, "kind": "missing"})
-                    continue
+                safe_scene_id = _sanitize_file_name(scene_id) or "scene"
+                safe_scene_name = _sanitize_file_name(scene_name) or "scene"
 
                 if source.suffix.lower() in VIDEO_EXTENSIONS:
-                    safe_scene_name = _sanitize_file_name(scene_name) or "scene"
-                    target_name = f"{safe_scene_name}_shot_{shot_number:03d}_{mode}{source.suffix.lower()}"
-                    target = assets_dir / _sanitize_file_name(target_name)
+                    target_name = f"{safe_scene_id}_{safe_scene_name}_shot_{shot_number:03d}_{mode}{source.suffix.lower()}"
+                    target = _unique_target_path(assets_dir, target_name)
                     shutil.copy2(source, target)
                     media_count += 1
                     card_media.append({"mode": mode, "kind": "video", "assetRel": f"assets/{target.name}"})
                     continue
 
                 target_ext = ".png" if image_format == "png" else ".jpg"
-                safe_scene_name = _sanitize_file_name(scene_name) or "scene"
-                target_name = f"{safe_scene_name}_shot_{shot_number:03d}_{mode}{target_ext}"
-                target = assets_dir / _sanitize_file_name(target_name)
+                target_name = f"{safe_scene_id}_{safe_scene_name}_shot_{shot_number:03d}_{mode}{target_ext}"
+                target = _unique_target_path(assets_dir, target_name)
                 try:
                     _convert_image(source, target, image_format)
                 except Exception:
@@ -934,4 +1065,5 @@ def export_html_shots(payload: Dict[str, Any]) -> Dict[str, Any]:
         "count": len(cards),
         "sceneCount": len(scene_inputs),
         "mediaCount": media_count,
+        "schemaVersion": SUPPORTED_SCHEMA_VERSION,
     }
