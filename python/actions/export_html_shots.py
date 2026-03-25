@@ -5,7 +5,7 @@ import re
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List
 
 from PIL import Image, ImageOps
 
@@ -194,19 +194,26 @@ def _iter_mode_paths(shot_payload: Dict[str, Any], mode: str) -> Iterable[str]:
             yield fallback
 
 
-def _pick_existing_source(shot_payload: Dict[str, Any], mode: str, project_root: Path) -> Optional[Path]:
-    seen = set()
+def _collect_existing_sources(shot_payload: Dict[str, Any], mode: str, project_root: Path) -> List[Path]:
+    out: List[Path] = []
+    seen_raw = set()
+    seen_resolved = set()
     for raw_path in _iter_mode_paths(shot_payload, mode):
-        if raw_path in seen:
+        if raw_path in seen_raw:
             continue
-        seen.add(raw_path)
+        seen_raw.add(raw_path)
         try:
             source = _resolve_input_path(raw_path, project_root)
         except Exception:
             continue
-        if source.exists() and source.is_file():
-            return source
-    return None
+        if not source.exists() or not source.is_file():
+            continue
+        resolved_key = str(source)
+        if resolved_key in seen_resolved:
+            continue
+        seen_resolved.add(resolved_key)
+        out.append(source)
+    return out
 
 
 def _convert_image(source: Path, target: Path, image_format: str) -> None:
@@ -293,8 +300,17 @@ def _build_html(scene_name: str, cards: List[Dict[str, Any]], image_format: str,
     for card in cards:
         for media in card.get("media", []):
             mode = str(media.get("mode") or "")
-            kind = str(media.get("kind") or "")
-            if mode in available_by_mode and kind in ("image", "video"):
+            versions = media.get("versions")
+            has_real_media = False
+            if isinstance(versions, list):
+                for version in versions:
+                    if not isinstance(version, dict):
+                        continue
+                    version_kind = str(version.get("kind") or "")
+                    if version_kind in ("image", "video"):
+                        has_real_media = True
+                        break
+            if mode in available_by_mode and has_real_media:
                 available_by_mode[mode] = True
 
     first_mode = ""
@@ -344,35 +360,67 @@ def _build_html(scene_name: str, cards: List[Dict[str, Any]], image_format: str,
         for media in card.get("media", []):
             mode = str(media.get("mode") or "")
             mode_label = MODE_LABELS.get(mode, mode.title())
-            kind = str(media.get("kind") or "missing")
             is_active = mode == first_mode
             visibility_class = " shot-media-shell--active" if is_active else ""
 
-            if kind in ("image", "video"):
-                browse_count += 1
-                asset_rel = str(media.get("assetRel") or "")
-                title = f"{shot_label} - {mode_label}"
-                if kind == "video":
-                    media_body = (
-                        f'<video class="shot-media js-browse-item" src="{html.escape(asset_rel, quote=True)}" '
-                        f'controls preload="metadata" data-mode="{html.escape(mode, quote=True)}" '
-                        f'data-kind="video" data-title="{html.escape(title, quote=True)}"></video>'
+            versions = media.get("versions")
+            version_rows: List[str] = []
+            if isinstance(versions, list):
+                for version_idx, version in enumerate(versions):
+                    if not isinstance(version, dict):
+                        continue
+                    kind = str(version.get("kind") or "")
+                    asset_rel = str(version.get("assetRel") or "")
+                    if kind not in ("image", "video") or not asset_rel:
+                        continue
+                    browse_count += 1
+                    title = f"{shot_label} - {mode_label} v{version_idx + 1}"
+                    if kind == "video":
+                        media_item = (
+                            f'<video class="shot-media js-browse-item" src="{html.escape(asset_rel, quote=True)}" '
+                            f'controls preload="metadata" data-mode="{html.escape(mode, quote=True)}" '
+                            f'data-kind="video" data-title="{html.escape(title, quote=True)}"></video>'
+                        )
+                    else:
+                        media_item = (
+                            f'<img class="shot-media js-browse-item" src="{html.escape(asset_rel, quote=True)}" '
+                            f'alt="{html.escape(title, quote=True)}" data-mode="{html.escape(mode, quote=True)}" '
+                            f'data-kind="image" data-title="{html.escape(title, quote=True)}" />'
+                        )
+                    version_rows.append(
+                        f"""
+                  <div class="shot-version-media{' shot-version-media--active' if version_idx == 0 else ''}" data-shot-version-index="{version_idx}">
+                    {media_item}
+                  </div>"""
                     )
-                else:
-                    media_body = (
-                        f'<img class="shot-media js-browse-item" src="{html.escape(asset_rel, quote=True)}" '
-                        f'alt="{html.escape(title, quote=True)}" data-mode="{html.escape(mode, quote=True)}" '
-                        f'data-kind="image" data-title="{html.escape(title, quote=True)}" />'
-                    )
+
+            if version_rows:
+                buttons_markup = ""
+                if len(version_rows) > 1:
+                    buttons = []
+                    for version_idx in range(len(version_rows)):
+                        button_label = version_idx + 1
+                        buttons.append(
+                            f'<button type="button" class="shot-version-button{" shot-version-button--active" if version_idx == 0 else ""}" '
+                            f'data-shot-version-button="{version_idx}">{button_label}</button>'
+                        )
+                    buttons_markup = f'<div class="shot-version-controls">{"".join(buttons)}</div>'
+                media_body = f"""
+                {buttons_markup}
+                <div class="shot-version-viewport">
+                  {''.join(version_rows)}
+                </div>"""
+                shell_kind = "media"
             else:
                 media_body = (
                     f'<div class="shot-media shot-media--missing" data-mode="{html.escape(mode, quote=True)}">'
                     f'No {html.escape(mode_label)}</div>'
                 )
+                shell_kind = "missing"
 
             media_markup.append(
                 f"""
-              <div class="shot-media-shell{visibility_class}" data-shot-media-mode="{html.escape(mode, quote=True)}" data-shot-media-kind="{html.escape(kind, quote=True)}">
+              <div class="shot-media-shell{visibility_class}" data-shot-media-mode="{html.escape(mode, quote=True)}" data-shot-media-kind="{html.escape(shell_kind, quote=True)}">
                 {media_body}
               </div>"""
             )
@@ -591,6 +639,38 @@ def _build_html(scene_name: str, cards: List[Dict[str, Any]], image_format: str,
       object-fit: contain;
       display: block;
     }}
+    .shot-version-controls {{
+      display: inline-flex;
+      gap: 6px;
+      padding: 0 0 8px;
+      flex-wrap: wrap;
+    }}
+    .shot-version-button {{
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(18, 19, 20, 0.9);
+      color: rgba(226, 231, 232, 0.9);
+      border-radius: 999px;
+      font-size: 12px;
+      line-height: 1;
+      padding: 4px 8px;
+      cursor: pointer;
+      min-width: 28px;
+    }}
+    .shot-version-button:hover {{
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+    }}
+    .shot-version-button--active {{
+      background: var(--accent);
+      color: #ffffff;
+      border-color: rgba(98, 153, 255, 0.8);
+    }}
+    .shot-version-media {{
+      display: none;
+    }}
+    .shot-version-media--active {{
+      display: block;
+    }}
     .js-browse-item {{
       cursor: zoom-in;
     }}
@@ -791,14 +871,31 @@ def _build_html(scene_name: str, cards: List[Dict[str, Any]], image_format: str,
       }};
 
       const refreshBrowseItems = () => {{
-        browseItems = Array.from(document.querySelectorAll(".shot-media-shell--active .js-browse-item"));
+        browseItems = Array.from(document.querySelectorAll(".shot-media-shell--active .shot-version-media--active .js-browse-item"));
       }};
 
       const getModeShell = (row, mode) => row.querySelector(`[data-shot-media-mode="${{mode}}"]`);
       const hasRealMedia = (shell) => {{
         if (!shell) return false;
         const kind = shell.dataset.shotMediaKind || "missing";
-        return kind === "image" || kind === "video";
+        return kind !== "missing";
+      }};
+      const setShellVersion = (shell, requestedIndex, closeOpenViewer = true) => {{
+        const versionItems = Array.from(shell.querySelectorAll("[data-shot-version-index]"));
+        if (!versionItems.length) return;
+        const maxIndex = versionItems.length - 1;
+        const normalized = Math.max(0, Math.min(maxIndex, requestedIndex));
+        versionItems.forEach((item, idx) => {{
+          item.classList.toggle("shot-version-media--active", idx === normalized);
+        }});
+        const versionButtons = Array.from(shell.querySelectorAll("[data-shot-version-button]"));
+        versionButtons.forEach((button, idx) => {{
+          button.classList.toggle("shot-version-button--active", idx === normalized);
+        }});
+        refreshBrowseItems();
+        if (closeOpenViewer && !viewer.hidden) {{
+          closeViewer();
+        }}
       }};
       const pickVisibleShellForMode = (row, mode) => {{
         const primary = getModeShell(row, mode);
@@ -866,6 +963,9 @@ def _build_html(scene_name: str, cards: List[Dict[str, Any]], image_format: str,
           const chosen = pickVisibleShellForMode(row, mode);
           if (chosen) {{
             chosen.classList.add("shot-media-shell--active");
+            if (!chosen.querySelector(".shot-version-media--active")) {{
+              setShellVersion(chosen, 0, false);
+            }}
           }}
         }});
         refreshBrowseItems();
@@ -907,6 +1007,15 @@ def _build_html(scene_name: str, cards: List[Dict[str, Any]], image_format: str,
           if (rowIdx >= 0) {{
             setActiveShot(rowIdx, false);
           }}
+        }}
+        const versionButton = target.closest("[data-shot-version-button]");
+        if (versionButton instanceof HTMLElement) {{
+          const shell = versionButton.closest(".shot-media-shell");
+          if (!(shell instanceof HTMLElement)) return;
+          const versionIndex = Number.parseInt(versionButton.dataset.shotVersionButton || "0", 10);
+          setShellVersion(shell, Number.isFinite(versionIndex) ? versionIndex : 0);
+          event.preventDefault();
+          return;
         }}
         const media = target.closest(".js-browse-item");
         if (!(media instanceof HTMLElement)) return;
@@ -1014,32 +1123,42 @@ def export_html_shots(payload: Dict[str, Any]) -> Dict[str, Any]:
 
             card_media: List[Dict[str, Any]] = []
             for mode in selected_modes:
-                source = _pick_existing_source(raw_shot, mode, project_root)
-                if source is None:
+                sources = _collect_existing_sources(raw_shot, mode, project_root)
+                if not sources:
                     card_media.append({"mode": mode, "kind": "missing"})
                     continue
 
                 safe_scene_id = _sanitize_file_name(scene_id) or "scene"
                 safe_scene_name = _sanitize_file_name(scene_name) or "scene"
+                versions: List[Dict[str, Any]] = []
 
-                if source.suffix.lower() in VIDEO_EXTENSIONS:
-                    target_name = f"{safe_scene_id}_{safe_scene_name}_shot_{shot_number:03d}_{mode}{source.suffix.lower()}"
+                for version_index, source in enumerate(sources):
+                    version_tag = f"_v{version_index + 1:02d}"
+                    if source.suffix.lower() in VIDEO_EXTENSIONS:
+                        target_name = (
+                            f"{safe_scene_id}_{safe_scene_name}_shot_{shot_number:03d}_{mode}"
+                            f"{version_tag}{source.suffix.lower()}"
+                        )
+                        target = _unique_target_path(assets_dir, target_name)
+                        shutil.copy2(source, target)
+                        media_count += 1
+                        versions.append({"kind": "video", "assetRel": f"assets/{target.name}"})
+                        continue
+
+                    target_ext = ".png" if image_format == "png" else ".jpg"
+                    target_name = f"{safe_scene_id}_{safe_scene_name}_shot_{shot_number:03d}_{mode}{version_tag}{target_ext}"
                     target = _unique_target_path(assets_dir, target_name)
-                    shutil.copy2(source, target)
+                    try:
+                        _convert_image(source, target, image_format)
+                    except Exception:
+                        continue
                     media_count += 1
-                    card_media.append({"mode": mode, "kind": "video", "assetRel": f"assets/{target.name}"})
-                    continue
+                    versions.append({"kind": "image", "assetRel": f"assets/{target.name}"})
 
-                target_ext = ".png" if image_format == "png" else ".jpg"
-                target_name = f"{safe_scene_id}_{safe_scene_name}_shot_{shot_number:03d}_{mode}{target_ext}"
-                target = _unique_target_path(assets_dir, target_name)
-                try:
-                    _convert_image(source, target, image_format)
-                except Exception:
+                if versions:
+                    card_media.append({"mode": mode, "kind": "media", "versions": versions})
+                else:
                     card_media.append({"mode": mode, "kind": "missing"})
-                    continue
-                media_count += 1
-                card_media.append({"mode": mode, "kind": "image", "assetRel": f"assets/{target.name}"})
 
             cards.append(
                 {

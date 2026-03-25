@@ -1,2 +1,3 @@
 # Python runtime dependencies (installed into local .venv by Electron PythonService)
 Pillow>=10.0.0,<12.0.0
+imageio-ffmpeg>=0.5.1,<1.0.0

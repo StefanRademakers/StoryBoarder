@@ -22,6 +22,7 @@ interface UseShotsExportParams<TShot> {
   loadShotsForScene: (sceneId: string) => Promise<TShot[]>;
   shots: TShot[];
   displayMode: ShotDisplayMode;
+  projectName: string;
   projectRoot: string;
   scenesRoot: string;
   projectFrameRate: number;
@@ -31,6 +32,7 @@ interface UseShotsExportParams<TShot> {
   resolveShotAssetPathForScene: (sceneId: string, shot: TShot, mode: ShotDisplayMode) => string;
   resolveFcp7Media: (shot: TShot) => { path: string; mediaType: "video" | "image"; durationSeconds?: number | null } | null;
   resolveFavoriteClipPath: (shot: TShot) => string;
+  resolveShotDurationSeconds?: (shot: TShot) => number | null | undefined;
   resolveShotDescription?: (shot: TShot) => string | null | undefined;
   resolveShotDetails?: (shot: TShot) => Record<string, string | number | null | undefined>;
   resolveShotMediaCandidatesForScene?: (sceneId: string, shot: TShot, mode: ShotDisplayMode) => string[];
@@ -68,6 +70,7 @@ interface UseShotsExportResult {
   exportSceneGrid: () => Promise<void>;
   exportSceneFcp7: () => Promise<void>;
   exportSceneClips: () => Promise<void>;
+  exportSceneMp4: () => Promise<void>;
   exportSceneHtml: () => Promise<void>;
 }
 
@@ -115,6 +118,7 @@ export function useShotsExport<TShot>({
   loadShotsForScene,
   shots,
   displayMode,
+  projectName,
   projectRoot,
   scenesRoot,
   projectFrameRate,
@@ -124,6 +128,7 @@ export function useShotsExport<TShot>({
   resolveShotAssetPathForScene,
   resolveFcp7Media,
   resolveFavoriteClipPath,
+  resolveShotDurationSeconds,
   resolveShotDescription,
   resolveShotDetails,
   resolveShotMediaCandidatesForScene,
@@ -369,6 +374,85 @@ export function useShotsExport<TShot>({
     }
   }, [activeScene, gridExportBusy, resolveFavoriteClipPath, scenesRoot, shots]);
 
+  const exportSceneMp4 = useCallback(async () => {
+    if (!shots.length || gridExportBusy) return;
+    if (displayMode !== "concept" && displayMode !== "still") {
+      setGridExportMessage("Export MP4 is only available in Concept or Still mode.");
+      return;
+    }
+
+    const mode: "concept" | "still" = displayMode;
+    const exportDir = joinPath(projectRoot, "exports");
+    const safeProjectName = (sanitizeFileName(projectName).replace(/\s+/g, "_") || "project");
+    const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "_");
+    const outputPath = joinPath(exportDir, `${safeProjectName}_preview_${timestamp}.mp4`);
+    const items: Array<{ shotNumber: number; path: string; durationSeconds: number }> = [];
+
+    for (let idx = 0; idx < shots.length; idx += 1) {
+      const shot = shots[idx];
+      const sourcePath = resolveShotAssetPath(shot, mode).trim();
+      if (!sourcePath) continue;
+      if (!(await electron.exists(sourcePath))) continue;
+      const durationRaw = resolveShotDurationSeconds?.(shot);
+      const durationSeconds = typeof durationRaw === "number" && Number.isFinite(durationRaw) && durationRaw > 0
+        ? Math.max(0.1, durationRaw)
+        : 2;
+      items.push({
+        shotNumber: idx + 1,
+        path: sourcePath,
+        durationSeconds,
+      });
+    }
+
+    if (!items.length) {
+      setGridExportMessage("Export MP4 failed: no valid concept/still images found.");
+      return;
+    }
+
+    setGridExportBusy(true);
+    setGridExportMessage(null);
+    try {
+      await electron.ensureDir(exportDir);
+      const response = await electron.runPythonCommand(
+        "export_mp4_shots",
+        {
+          projectName,
+          projectRoot,
+          mode,
+          outputPath,
+          fps: projectFrameRate,
+          width: projectWidth,
+          height: projectHeight,
+          items,
+        },
+        { timeoutMs: 300000 },
+      );
+      if (!response.ok) {
+        setGridExportMessage(`Export MP4 failed: ${response.error.message}`);
+        return;
+      }
+      const finalPath = typeof response.data?.outputPath === "string" ? response.data.outputPath : outputPath;
+      const exportedCount = typeof response.data?.count === "number" ? response.data.count : items.length;
+      setGridExportMessage(`Export MP4 completed (${exportedCount} shots).`);
+      await electron.revealInFileManager(finalPath);
+    } catch (error) {
+      setGridExportMessage(`Export MP4 failed: ${toErrorMessage(error)}`);
+    } finally {
+      setGridExportBusy(false);
+    }
+  }, [
+    displayMode,
+    gridExportBusy,
+    projectFrameRate,
+    projectHeight,
+    projectName,
+    projectRoot,
+    projectWidth,
+    resolveShotAssetPath,
+    resolveShotDurationSeconds,
+    shots,
+  ]);
+
   const exportSceneHtml = useCallback(async () => {
     if (gridExportBusy) return;
     const selectedModes = htmlExportModes.filter((mode) => HTML_EXPORT_ALLOWED_MODES.includes(mode));
@@ -449,7 +533,7 @@ export function useShotsExport<TShot>({
       };
       const response = await electron.runPythonCommand(
         "export_html_shots",
-        payload,
+        payload as unknown as Record<string, unknown>,
         { timeoutMs: 180000 },
       );
       if (!response.ok) {
@@ -521,6 +605,7 @@ export function useShotsExport<TShot>({
     exportSceneGrid,
     exportSceneFcp7,
     exportSceneClips,
+    exportSceneMp4,
     exportSceneHtml,
   };
 }

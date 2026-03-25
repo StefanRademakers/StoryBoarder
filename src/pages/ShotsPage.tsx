@@ -1092,6 +1092,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
     exportSceneGrid,
     exportSceneFcp7,
     exportSceneClips,
+    exportSceneMp4,
     exportSceneHtml,
   } = useShotsExport({
     activeScene: activeScene ? { id: activeScene.id, name: activeScene.name } : null,
@@ -1103,6 +1104,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
     },
     shots,
     displayMode,
+    projectName: project.name,
     projectRoot: project.paths.root,
     scenesRoot,
     projectFrameRate: resolveProjectDimension(project.settings?.framerate, 24),
@@ -1113,6 +1115,7 @@ export function ShotsPage({ project }: ShotsPageProps) {
     resolveShotMediaCandidatesForScene: (sceneId, shot, mode) => shotAssetCandidatesForScene(sceneId, shot, mode),
     resolveFcp7Media: resolveShotAssetPathForFcp7,
     resolveFavoriteClipPath: resolveFavoriteClipPathForExport,
+    resolveShotDurationSeconds: (shot) => shot.durationSeconds ?? null,
     resolveShotDescription: (shot) => shot.description,
     resolveShotDetails: (shot) => ({
       durationSeconds: shot.durationSeconds ?? null,
@@ -1398,6 +1401,9 @@ export function ShotsPage({ project }: ShotsPageProps) {
               }}
               onExportClips={() => {
                 void exportSceneClips();
+              }}
+              onExportMp4={() => {
+                void exportSceneMp4();
               }}
               onExportHtml={() => {
                 openHtmlExportDialog();

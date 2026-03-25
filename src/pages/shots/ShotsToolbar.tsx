@@ -16,6 +16,7 @@ interface ShotsToolbarProps {
   onOpenExport: () => void;
   onExportFcp7: () => void;
   onExportClips: () => void;
+  onExportMp4: () => void;
   onExportHtml: () => void;
   onDisplayModeChange: (mode: ShotDisplayMode) => void;
 }
@@ -34,6 +35,7 @@ export function ShotsToolbar({
   onOpenExport,
   onExportFcp7,
   onExportClips,
+  onExportMp4,
   onExportHtml,
   onDisplayModeChange,
 }: ShotsToolbarProps) {
@@ -135,6 +137,14 @@ export function ShotsToolbar({
                   onClick={() => runExportAction(onExportClips)}
                 >
                   Export Clips
+                </button>
+                <button
+                  type="button"
+                  className="shots-toolbar__export-dropdown-item"
+                  role="menuitem"
+                  onClick={() => runExportAction(onExportMp4)}
+                >
+                  Export MP4
                 </button>
                 <button
                   type="button"
